@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Items from '@/domain/items'
 import { api } from '@/data/api'
-import { useSyncedList } from '@/data/useSyncedList'
+import { describe, useSyncedList } from '@/data/useSyncedList'
 import { ListPane } from './ListPane'
 import { DetailPane } from './DetailPane'
 import { SummaryPane } from './SummaryPane'
@@ -12,7 +12,7 @@ import '@/styles/app.css'
 
 export function App() {
   const { listId, openList } = useListRoute()
-  const [bootError, setBootError] = useState(false)
+  const [bootError, setBootError] = useState<string | null>(null)
 
   // Landing on `/` mints a list and swaps the URL for it, so the address bar is
   // always something you can send to someone.
@@ -24,7 +24,7 @@ export function App() {
     api
       .createList()
       .then((state) => openList(state.id, { replace: true }))
-      .catch(() => setBootError(true))
+      .catch((failure: unknown) => setBootError(describe(failure)))
       .finally(() => {
         creating.current = false
       })
@@ -83,14 +83,15 @@ export function App() {
     api
       .createList()
       .then((state) => openList(state.id))
-      .catch(() => setBootError(true))
+      .catch((failure: unknown) => setBootError(describe(failure)))
   }, [openList])
 
   if (bootError || list.status === 'error') {
     return (
       <Notice
         title="Can't reach the list"
-        body="The server isn't answering. Your last view is cached, so try again in a moment."
+        body="The server answered with an error. If this is a fresh deploy, the database settings are the usual cause."
+        detail={bootError ?? list.error}
         action={{ label: 'Try again', onClick: () => window.location.reload() }}
       />
     )

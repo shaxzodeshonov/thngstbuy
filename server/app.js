@@ -12,6 +12,7 @@
 import express from 'express'
 import compression from 'compression'
 import * as db from './db.js'
+import { usingTurso } from './adapters.js'
 import { isListId, newItemId, newListId } from './ids.js'
 
 const LIMITS = { name: 200, model: 500, where: 500, why: 2000, itemsPerList: 500 }
@@ -43,7 +44,23 @@ export function createApp() {
 
   const api = express.Router()
 
-  api.get('/healthz', (_req, res) => res.type('text').send('ok'))
+  /**
+   * Reports which database it's actually talking to. `store: "file"` on a
+   * hosted deploy is the single most useful signal that the Turso environment
+   * variables never arrived. No secrets — just which branch was taken.
+   */
+  api.get('/healthz', async (_req, res) => {
+    try {
+      await db.readVersion('healthcheck0')
+      res.json({ ok: true, store: usingTurso ? 'turso' : 'file' })
+    } catch (error) {
+      res.status(503).json({
+        ok: false,
+        store: usingTurso ? 'turso' : 'file',
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  })
 
   api.use(
     rateLimit({
@@ -163,7 +180,12 @@ export function createApp() {
   // with JSON the client can show rather than an empty 500.
   app.use((error, _req, res, _next) => {
     console.error(error)
-    res.status(500).json({ error: 'Something went wrong on the server.' })
+    // The message is surfaced to the client on purpose: with no login and no
+    // log access from a phone, a blank "something went wrong" makes a broken
+    // deploy impossible to diagnose. Nothing here contains a secret.
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Something went wrong on the server.',
+    })
   })
 
   return app

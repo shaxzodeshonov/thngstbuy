@@ -39,6 +39,17 @@ async function createTursoAdapter() {
 
 /** @returns {Promise<Adapter>} */
 async function createFileAdapter() {
+  // Without this the failure is an EROFS deep inside mkdirSync, which tells
+  // nobody anything. On Vercel there is no writable disk, so a missing Turso
+  // URL can only ever mean the environment variables didn't land.
+  if (process.env.VERCEL) {
+    throw new Error(
+      'TURSO_DATABASE_URL is not set. Vercel has no writable disk, so the local ' +
+        'SQLite file cannot be used here. Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN ' +
+        'under Project Settings > Environment Variables, then redeploy.',
+    )
+  }
+
   const { DatabaseSync } = await import('node:sqlite')
   const { mkdirSync } = await import('node:fs')
   const { dirname, resolve } = await import('node:path')

@@ -29,6 +29,8 @@ export type SyncStatus = 'loading' | 'ready' | 'missing' | 'error'
 export type SyncedList = {
   items: Item[]
   status: SyncStatus
+  /** What the server actually said, when status is 'error'. Shown to the user. */
+  error: string | null
   /** False when the last poll failed — edits still apply locally and reconcile. */
   live: boolean
   add(name: string): Item | null
@@ -40,6 +42,7 @@ export type SyncedList = {
 export function useSyncedList(listId: string | null): SyncedList {
   const [items, setItems] = useState<Item[]>([])
   const [status, setStatus] = useState<SyncStatus>('loading')
+  const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
 
   /** Writes started but not yet acknowledged, including debounced ones. */
@@ -119,9 +122,14 @@ export function useSyncedList(listId: string | null): SyncedList {
         adopt(state)
         setStatus('ready')
       })
-      .catch((error: unknown) => {
+      .catch((failure: unknown) => {
         if (cancelled) return
-        setStatus(error instanceof ApiError && error.status === 404 ? 'missing' : 'error')
+        if (failure instanceof ApiError && failure.status === 404) {
+          setStatus('missing')
+          return
+        }
+        setError(describe(failure))
+        setStatus('error')
       })
 
     return () => {
@@ -313,7 +321,14 @@ export function useSyncedList(listId: string | null): SyncedList {
     }
   }, [])
 
-  return { items, status, live, add, update, toggleBought, remove }
+  return { items, status, error, live, add, update, toggleBought, remove }
+}
+
+/** Turns a thrown value into one line a person can act on. */
+export function describe(failure: unknown): string {
+  if (failure instanceof ApiError) return `HTTP ${failure.status} — ${failure.message}`
+  if (failure instanceof Error) return failure.message
+  return String(failure)
 }
 
 const cacheKey = (listId: string) => `thngstbuy.cache.${listId}`
