@@ -1,0 +1,36 @@
+/* Mirrors src/design/tokens.ts — change both together. */
+
+:root {
+  --canvas: #e9e6df;
+  --surface: #faf9f6;
+  --surface-sunken: #f4f2ed;
+
+  --ink: #1c1b19;
+  --ink-muted: #a9a49c;
+  --ink-faint: #c3bdb3;
+
+  --accent: #a28b68;
+  --accent-soft: #bca989;
+
+  --line: #e6e2da;
+  --line-strong: #d8d3c9;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 14px;
+  --space-lg: 20px;
+  --space-xl: 28px;
+  --space-xxl: 40px;
+
+  --radius-card: 28px;
+  --radius-control: 999px;
+
+  --quick: 140ms;
+  --settle: 260ms;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  /* Gutter inside the card. Grows with the viewport. */
+  --pad: 26px;
+}

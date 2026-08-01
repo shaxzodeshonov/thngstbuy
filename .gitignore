@@ -1,0 +1,17 @@
+node_modules
+dist
+*.local
+.DS_Store
+
+# The SQLite database and its WAL files. Real list contents live here.
+# Leading slash matters: an unanchored `data/` would also swallow src/data/.
+/data/
+
+# TypeScript incremental build state.
+*.tsbuildinfo
+
+# Vercel's local project link (contains project + org ids).
+.vercel
+
+# Machine-specific Claude Code permissions; launch.json is shared on purpose.
+.claude/settings.local.json

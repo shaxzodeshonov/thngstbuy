@@ -1,0 +1,8 @@
+# Normalise to LF in the repository regardless of the machine committing.
+* text=auto eol=lf
+
+# Binary-ish assets Git should not touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary

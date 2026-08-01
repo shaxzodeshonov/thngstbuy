@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#FAF9F6" />
+  <!-- The unchecked circle from a list row, at icon scale. -->
+  <circle cx="11" cy="16" r="4.25" fill="none" stroke="#A28B68" stroke-width="1.75" />
+  <path d="M19 16h6" stroke="#1C1B19" stroke-width="1.75" stroke-linecap="round" />
+</svg>

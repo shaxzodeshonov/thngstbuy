@@ -1,0 +1,5 @@
+# Every list URL is also its password. Nothing here should ever be crawled,
+# indexed, or archived. Reinforced by the X-Robots-Tag header the server sends
+# on every response and a meta tag in index.html.
+User-agent: *
+Disallow: /
