@@ -18,6 +18,14 @@ import { isListId, newItemId, newListId } from './ids.js'
 const LIMITS = { name: 200, model: 500, where: 500, why: 2000, itemsPerList: 500 }
 const MAX_PRICE = 1_000_000_000_000
 
+/**
+ * Query parameter the vercel.json rewrite uses to carry the original request
+ * path. Deliberately unlike anything the API itself accepts, so a real request
+ * can never be mistaken for a rewritten one. Change it in both places or not at
+ * all.
+ */
+const FORWARDED_PATH = '__path'
+
 export function createApp() {
   const app = express()
 
@@ -31,28 +39,25 @@ export function createApp() {
   app.disable('x-powered-by')
 
   /**
-   * Vercel's catch-all functions do not always hand the app the URL the browser
-   * asked for. Depending on how the route was matched, the path segments can
-   * arrive moved into a `path` query parameter instead, leaving `req.url`
-   * pointing at the function file rather than `/api/lists/<id>`.
+   * The hosted deploy reaches this app through an explicit rewrite in
+   * vercel.json, which carries the original path in a query parameter because
+   * the platform's own bracketed-filename routing matched only one path
+   * segment. Rebuilding `/api/...` here means every route below sees the same
+   * shape whether it arrived through that rewrite or from a normal server.
    *
-   * Rebuilding the path here means every route below only ever sees `/api/...`,
-   * whichever shape arrived. A normal server hits the early return and this
-   * costs nothing.
+   * A locally-served request has no such parameter and hits the early return.
    */
   app.use((req, _res, next) => {
-    if (req.url.startsWith('/api/')) return next()
-
     const query = req.url.indexOf('?')
     if (query === -1) return next()
 
     const params = new URLSearchParams(req.url.slice(query + 1))
-    const segments = params.getAll('path').filter(Boolean)
-    if (segments.length === 0) return next()
+    const original = params.get(FORWARDED_PATH)
+    if (!original) return next()
 
-    params.delete('path')
+    params.delete(FORWARDED_PATH)
     const rest = params.toString()
-    req.url = `/api/${segments.join('/')}${rest ? `?${rest}` : ''}`
+    req.url = `/api/${original.replace(/^\/+/, '')}${rest ? `?${rest}` : ''}`
     next()
   })
 
