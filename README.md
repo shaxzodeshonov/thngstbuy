@@ -271,10 +271,59 @@ src/
     tokens.css   mirrors design/tokens.ts
 ```
 
-## Porting to React Native
+## The phone app
 
-`domain/` moves across untouched. `data/` is close: the sync logic is React but
-barely touches the DOM.
+`app/` is an Expo (React Native) client for the same backend. It talks to the
+deployed API, so anything added on a phone shows up on the website and the other
+way round.
+
+```bash
+cd app
+npm start
+```
+
+Scan the QR code with Expo Go, or press `a` / `i` for an emulator.
+
+The screens are a transcription of the website's phone layout — same tokens,
+same type scale, same hairlines, same warm surface edge to edge. Two things the
+web version doesn't have:
+
+- **Swipe a row right** to tick it off. It fires as soon as you let go, because
+  ticking something off is the common action and tapping the circle undoes it.
+- **Swipe a row left** to reveal a Delete button, which you then press. Deleting
+  isn't undoable, so the swipe only offers it and the press commits — the same
+  two-step as the website's arming trash button.
+
+Deep links work: opening `https://thngstbuy.vercel.app/l/<name>` on a phone with
+the app installed opens it there. The last list you used is remembered, so
+reopening the app doesn't scatter empty lists behind you.
+
+### What is shared, and what isn't
+
+`src/domain/` — the list rules, money formatting and the `Item` shape — is used
+verbatim by both. Metro is pointed at that folder in
+[`app/metro.config.js`](app/metro.config.js) and resolves it under `@domain`, so
+there is one copy of `pendingTotal`, `parsePrice` and the rest.
+
+`app/src/useSyncedList.ts` is a port rather than a copy: the reconciliation rules
+are identical, but `AppState` replaces the browser's visibility events and the
+timer types are React Native's. `api.ts` differs only in needing an absolute URL.
+
+The UI is necessarily separate — CSS doesn't cross over — but
+[`app/src/theme.ts`](app/src/theme.ts) is a direct transcription of the web
+tokens, so the two stay in step by changing two files rather than by redesign.
+
+### Not verified on a device
+
+The app typechecks and bundles for Android, and the shared domain code and
+gesture libraries resolve. What has not been exercised is the app actually
+running on a phone — swipe feel, keyboard behaviour, and font rendering need a
+real device. Run `npm start` in `app/` and tell me what breaks.
+
+## Notes from the port
+
+Kept for reference — this is what the move to React Native actually cost, now
+that `app/` exists.
 
 1. **`api.ts`** — `fetch` works in RN as-is. Point the base URL at your deployed
    host instead of the relative `/api`. (Polling rather than SSE turned out to be
