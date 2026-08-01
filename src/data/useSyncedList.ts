@@ -33,10 +33,14 @@ export type SyncedList = {
   error: string | null
   /** False when the last poll failed — edits still apply locally and reconcile. */
   live: boolean
+  /** The list's name as the server knows it. Null until the first load lands. */
+  slug: string | null
   add(name: string): Item | null
   update(id: string, patch: Partial<Item>): void
   toggleBought(id: string): void
   remove(id: string): void
+  /** Resolves to null on success, or a message explaining why the name failed. */
+  rename(next: string): Promise<string | null>
 }
 
 export function useSyncedList(listId: string | null): SyncedList {
@@ -44,6 +48,8 @@ export function useSyncedList(listId: string | null): SyncedList {
   const [status, setStatus] = useState<SyncStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const [live, setLive] = useState(false)
+  /** The list's current name, which may differ from the one in the URL. */
+  const [slug, setSlug] = useState<string | null>(null)
 
   /** Writes started but not yet acknowledged, including debounced ones. */
   const inFlight = useRef(0)
@@ -65,8 +71,9 @@ export function useSyncedList(listId: string | null): SyncedList {
 
   const adopt = useCallback((state: ListState) => {
     version.current = state.version
+    setSlug(state.slug)
     setItems(state.items)
-    void storage.set(cacheKey(state.id), JSON.stringify(state.items))
+    void storage.set(cacheKey(state.slug), JSON.stringify(state.items))
   }, [])
 
   const reconcile = useCallback(async () => {
@@ -321,7 +328,27 @@ export function useSyncedList(listId: string | null): SyncedList {
     }
   }, [])
 
-  return { items, status, error, live, add, update, toggleBought, remove }
+  /**
+   * Renaming is one deliberate action, so it is not optimistic — the URL only
+   * changes once the server has agreed the name is free.
+   */
+  const rename = useCallback(
+    async (next: string): Promise<string | null> => {
+      if (!listId) return 'Not connected yet.'
+      inFlight.current++
+      try {
+        adopt(await api.renameList(listId, next))
+        return null
+      } catch (failure) {
+        return describe(failure)
+      } finally {
+        endWrite()
+      }
+    },
+    [adopt, endWrite, listId],
+  )
+
+  return { items, status, error, live, slug, add, update, toggleBought, remove, rename }
 }
 
 /** Turns a thrown value into one line a person can act on. */

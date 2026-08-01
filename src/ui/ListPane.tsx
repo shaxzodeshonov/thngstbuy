@@ -4,7 +4,6 @@ import * as Items from '@/domain/items'
 import { formatCount, formatMoney } from '@/domain/format'
 import { ItemRow } from './ItemRow'
 import { AddBar } from './AddBar'
-import { ShareButton } from './ShareButton'
 
 type ListPaneProps = {
   items: Item[]
@@ -14,9 +13,18 @@ type ListPaneProps = {
   onSelect(id: string): void
   onToggle(id: string): void
   onAdd(name: string): void
+  onShare(): void
 }
 
-export function ListPane({ items, selectedId, live, onSelect, onToggle, onAdd }: ListPaneProps) {
+export function ListPane({
+  items,
+  selectedId,
+  live,
+  onSelect,
+  onToggle,
+  onAdd,
+  onShare,
+}: ListPaneProps) {
   const [showBought, setShowBought] = useState(false)
 
   const pending = Items.pending(items)
@@ -35,7 +43,9 @@ export function ListPane({ items, selectedId, live, onSelect, onToggle, onAdd }:
               aria-label="Offline"
             />
           )}
-          <ShareButton />
+          <button type="button" className="label list__share" onClick={onShare}>
+            Share
+          </button>
           <span className="label list__count">{formatCount(pending.length)}</span>
         </div>
       </header>

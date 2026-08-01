@@ -7,7 +7,12 @@ import { useCallback, useEffect, useState } from 'react'
  * `Linking.getInitialURL()` instead of `location.pathname`.
  */
 
-const PATH = /^\/l\/([0-9a-hjkmnp-tv-z]{12})\/?$/
+/**
+ * Matches both shapes a list can be named by: the 12-character generated id and
+ * a chosen name like `shaxzod`. The server is the authority on what's valid;
+ * this only has to be loose enough to let a real name through.
+ */
+const PATH = /^\/l\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])\/?$/
 
 function readId(): string | null {
   return PATH.exec(window.location.pathname)?.[1] ?? null

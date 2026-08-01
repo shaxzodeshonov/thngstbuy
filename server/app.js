@@ -13,7 +13,7 @@ import express from 'express'
 import compression from 'compression'
 import * as db from './db.js'
 import { usingTurso } from './adapters.js'
-import { isListId, newItemId, newListId } from './ids.js'
+import { isListRef, newItemId, newListId, slugProblem } from './ids.js'
 
 const LIMITS = { name: 200, model: 500, where: 500, why: 2000, itemsPerList: 500 }
 const MAX_PRICE = 1_000_000_000_000
@@ -120,7 +120,7 @@ export function createApp() {
    */
   api.get('/lists/:id/version', async (req, res) => {
     const { id } = req.params
-    const version = isListId(id) ? await db.readVersion(id) : null
+    const version = isListRef(id) ? await db.readVersion(id) : null
     if (version === null) return res.status(404).json({ error: 'no such list' })
 
     res.setHeader('Cache-Control', 'no-store')
@@ -128,34 +128,54 @@ export function createApp() {
   })
 
   api.get('/lists/:id', async (req, res) => {
-    const state = await readOr404(req, res)
-    if (state) {
-      res.setHeader('Cache-Control', 'no-store')
-      res.json(state)
+    const list = await resolveOr404(req, res)
+    if (!list) return
+    res.setHeader('Cache-Control', 'no-store')
+    res.json(await db.readListById(list))
+  })
+
+  /**
+   * Renames the link. The generated id keeps working afterwards, so a link
+   * someone was already given never dies just because the list got a nicer name.
+   */
+  api.patch('/lists/:id', async (req, res) => {
+    const list = await resolveOr404(req, res)
+    if (!list) return
+
+    const wanted = typeof req.body?.slug === 'string' ? req.body.slug.trim().toLowerCase() : ''
+    const problem = slugProblem(wanted)
+    if (problem) return res.status(400).json({ error: problem })
+
+    if (wanted === list.slug) return res.json(await db.readListById(list))
+
+    if ((await db.renameList(list.id, wanted)) === 'taken') {
+      return res.status(409).json({ error: 'That name is already taken. Try another.' })
     }
+
+    res.json(await db.readListById({ ...list, slug: wanted }))
   })
 
   api.post('/lists/:id/items', async (req, res) => {
-    const state = await readOr404(req, res)
-    if (!state) return
+    const list = await resolveOr404(req, res)
+    if (!list) return
 
     const name = text(req.body?.name, LIMITS.name)
     if (!name) return res.status(400).json({ error: 'name is required' })
 
-    if ((await db.itemCount(state.id)) >= LIMITS.itemsPerList) {
+    if ((await db.itemCount(list.id)) >= LIMITS.itemsPerList) {
       return res.status(409).json({ error: `a list holds at most ${LIMITS.itemsPerList} things` })
     }
 
     // The client generates the id so its optimistic row and the stored row match.
     const itemId = isUuid(req.body?.id) ? req.body.id : newItemId()
-    await db.addItem(state.id, itemId, name)
+    await db.addItem(list.id, itemId, name)
 
-    res.status(201).json(await db.readList(state.id))
+    res.status(201).json(await db.readListById(list))
   })
 
   api.patch('/lists/:id/items/:itemId', async (req, res) => {
-    const state = await readOr404(req, res)
-    if (!state) return
+    const list = await resolveOr404(req, res)
+    if (!list) return
 
     const patch = {}
     const body = req.body ?? {}
@@ -180,22 +200,22 @@ export function createApp() {
 
     if ('bought' in body) patch.bought = Boolean(body.bought)
 
-    if (!(await db.patchItem(state.id, req.params.itemId, patch))) {
+    if (!(await db.patchItem(list.id, req.params.itemId, patch))) {
       return res.status(404).json({ error: 'no such item' })
     }
 
-    res.json(await db.readList(state.id))
+    res.json(await db.readListById(list))
   })
 
   api.delete('/lists/:id/items/:itemId', async (req, res) => {
-    const state = await readOr404(req, res)
-    if (!state) return
+    const list = await resolveOr404(req, res)
+    if (!list) return
 
-    if (!(await db.removeItem(state.id, req.params.itemId))) {
+    if (!(await db.removeItem(list.id, req.params.itemId))) {
       return res.status(404).json({ error: 'no such item' })
     }
 
-    res.json(await db.readList(state.id))
+    res.json(await db.readListById(list))
   })
 
   /**
@@ -243,14 +263,15 @@ export function createApp() {
 
 /* ------------------------------------------------------------- helpers -- */
 
-async function readOr404(req, res) {
+/** Resolves the URL's name to a list row once, so routes don't each re-query. */
+async function resolveOr404(req, res) {
   const { id } = req.params
-  const state = isListId(id) ? await db.readList(id) : null
-  if (!state) {
+  const list = isListRef(id) ? await db.resolveList(id) : null
+  if (!list) {
     res.status(404).json({ error: 'no such list' })
     return null
   }
-  return state
+  return list
 }
 
 function text(value, max) {

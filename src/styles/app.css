@@ -599,6 +599,138 @@
   border-radius: var(--radius-control);
 }
 
+/* --------------------------------------------------------------- share --- */
+
+.share {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  padding: var(--pad);
+}
+
+.share__head {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding-bottom: 26px;
+}
+
+.share__body {
+  min-height: 0;
+  overflow-y: auto;
+  max-width: 460px;
+}
+
+.share__title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+}
+
+.share__lead {
+  margin: 10px 0 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+.share__url {
+  margin: 26px 0 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.share__copy {
+  margin-top: 14px;
+  color: var(--accent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 12px 20px;
+  transition: color var(--quick) var(--ease), background-color var(--quick) var(--ease),
+    border-color var(--quick) var(--ease);
+}
+
+.share__copy:hover,
+.share__copy[data-copied='true'] {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.share__rename {
+  margin-top: 38px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.share__input {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 8px;
+}
+
+.share__prefix {
+  flex: none;
+  font-size: 15.5px;
+  color: var(--ink-faint);
+}
+
+.share__field {
+  font-size: 15.5px;
+  color: var(--ink);
+}
+
+.share__note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+.share__note em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.share__problem {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #a8574a;
+}
+
+.share__save {
+  margin-top: 20px;
+  color: var(--accent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 12px 20px;
+  transition: color var(--quick) var(--ease), border-color var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+}
+
+.share__save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.share__save:not(:disabled):hover {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 /* -------------------------------------------------------------- notice --- */
 
 .card--notice {

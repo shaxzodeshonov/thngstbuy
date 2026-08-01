@@ -1,6 +1,11 @@
 /**
  * Schema and queries. Everything is async because the production adapter talks
  * to Turso over HTTP; the local file adapter just resolves immediately.
+ *
+ * A list has two identifiers. `id` is generated once and never changes, so item
+ * rows can point at it forever. `slug` is what appears in the URL and can be
+ * renamed. Keeping them apart means renaming a list rewrites one column instead
+ * of cascading through every item.
  */
 
 import { getAdapter } from './adapters.js'
@@ -34,16 +39,30 @@ const SCHEMA = `
 /**
  * Runs once per process. A serverless instance may be cold, so this can't be a
  * deploy-time step — but `IF NOT EXISTS` makes it free on every warm start.
- * @type {Promise<import('./adapters.js')['getAdapter'] extends never ? never : any>}
  */
 let ready
 function db() {
   ready ??= (async () => {
     const adapter = await getAdapter()
     await adapter.executeScript(SCHEMA)
+    await addSlugColumn(adapter)
     return adapter
   })()
   return ready
+}
+
+/**
+ * `slug` arrived after the first lists already existed, and SQLite has no
+ * "ADD COLUMN IF NOT EXISTS". Existing lists keep their generated id as their
+ * slug, so every link that was already shared keeps working.
+ */
+async function addSlugColumn(adapter) {
+  const { rows } = await adapter.execute(`PRAGMA table_info(lists)`)
+  if (rows.some((row) => row.name === 'slug')) return
+
+  await adapter.execute(`ALTER TABLE lists ADD COLUMN slug TEXT`)
+  await adapter.execute(`UPDATE lists SET slug = id WHERE slug IS NULL`)
+  await adapter.execute(`CREATE UNIQUE INDEX IF NOT EXISTS lists_by_slug ON lists (slug)`)
 }
 
 /**
@@ -74,51 +93,87 @@ async function bumpVersion(adapter, listId) {
   ])
 }
 
+/**
+ * Turns whatever was in the URL into the row it names. Every route starts here,
+ * so the rest of the file only ever deals in internal ids.
+ */
+export async function resolveList(ref) {
+  const adapter = await db()
+  const { rows } = await adapter.execute(
+    `SELECT id, slug, version FROM lists WHERE slug = ? OR id = ? LIMIT 1`,
+    [ref, ref],
+  )
+  if (rows.length === 0) return null
+  return { id: rows[0].id, slug: rows[0].slug ?? rows[0].id, version: num(rows[0].version) }
+}
+
 export async function createList(id) {
   const adapter = await db()
   const now = new Date().toISOString()
-  await adapter.execute(`INSERT INTO lists (id, version, created_at, updated_at) VALUES (?, 0, ?, ?)`, [
-    id,
-    now,
-    now,
-  ])
-  return { id, version: 0, items: [] }
-}
-
-export async function listExists(id) {
-  const adapter = await db()
-  const { rows } = await adapter.execute(`SELECT id FROM lists WHERE id = ?`, [id])
-  return rows.length > 0
+  await adapter.execute(
+    `INSERT INTO lists (id, slug, version, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
+    [id, id, now, now],
+  )
+  return { slug: id, version: 0, items: [] }
 }
 
 /** Just the version — what polling clients ask for every few seconds. */
-export async function readVersion(id) {
-  const adapter = await db()
-  const { rows } = await adapter.execute(`SELECT version FROM lists WHERE id = ?`, [id])
-  return rows.length === 0 ? null : num(rows[0].version)
+export async function readVersion(ref) {
+  const list = await resolveList(ref)
+  return list === null ? null : list.version
 }
 
 /** The whole list — what every mutation returns. */
-export async function readList(id) {
-  const adapter = await db()
-  const { rows } = await adapter.execute(`SELECT id, version FROM lists WHERE id = ?`, [id])
-  if (rows.length === 0) return null
+export async function readList(ref) {
+  const list = await resolveList(ref)
+  if (!list) return null
+  return readListById(list)
+}
 
+async function readListById(list) {
+  const adapter = await db()
   const items = await adapter.execute(
     `SELECT * FROM items WHERE list_id = ? ORDER BY position, rowid`,
-    [id],
+    [list.id],
   )
-
+  const { rows } = await adapter.execute(`SELECT slug, version FROM lists WHERE id = ?`, [list.id])
   return {
-    id: rows[0].id,
-    version: num(rows[0].version),
+    slug: rows[0]?.slug ?? list.slug,
+    version: num(rows[0]?.version ?? list.version),
     items: items.rows.map(toItem),
   }
 }
 
-export async function itemCount(id) {
+export { readListById }
+
+/**
+ * Renames the list. Returns 'taken' rather than throwing so the route can say
+ * something useful — a clash is an ordinary thing for a person to hit, not an
+ * error.
+ */
+export async function renameList(listId, slug) {
   const adapter = await db()
-  const { rows } = await adapter.execute(`SELECT COUNT(*) AS n FROM items WHERE list_id = ?`, [id])
+
+  const { rows } = await adapter.execute(`SELECT id FROM lists WHERE slug = ? AND id != ?`, [
+    slug,
+    listId,
+  ])
+  if (rows.length > 0) return 'taken'
+
+  await adapter.execute(`UPDATE lists SET slug = ?, updated_at = ? WHERE id = ?`, [
+    slug,
+    new Date().toISOString(),
+    listId,
+  ])
+  await bumpVersion(adapter, listId)
+  return 'ok'
+}
+
+export async function itemCount(listId) {
+  const adapter = await db()
+  const { rows } = await adapter.execute(`SELECT COUNT(*) AS n FROM items WHERE list_id = ?`, [
+    listId,
+  ])
   return num(rows[0].n)
 }
 

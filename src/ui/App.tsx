@@ -5,6 +5,7 @@ import { describe, useSyncedList } from '@/data/useSyncedList'
 import { ListPane } from './ListPane'
 import { DetailPane } from './DetailPane'
 import { SummaryPane } from './SummaryPane'
+import { ShareSheet } from './ShareSheet'
 import { Notice } from './Notice'
 import { useListRoute } from './useListRoute'
 import { WIDE, useMediaQuery } from './useMediaQuery'
@@ -23,7 +24,7 @@ export function App() {
 
     api
       .createList()
-      .then((state) => openList(state.id, { replace: true }))
+      .then((state) => openList(state.slug, { replace: true }))
       .catch((failure: unknown) => setBootError(describe(failure)))
       .finally(() => {
         creating.current = false
@@ -34,7 +35,14 @@ export function App() {
   const wide = useMediaQuery(WIDE)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
   const selected = list.items.find((i) => i.id === selectedId) ?? null
+
+  // A rename changes the list's name under the URL that's showing. Replace it
+  // rather than push, so Back doesn't lead to the name that no longer applies.
+  useEffect(() => {
+    if (list.slug && listId && list.slug !== listId) openList(list.slug, { replace: true })
+  }, [list.slug, listId, openList])
 
   // Something deleted here or by someone else must not leave a dead pane.
   useEffect(() => {
@@ -66,23 +74,24 @@ export function App() {
     if (!wide) setSelectedId(null)
   }, [list, selected, wide])
 
-  // Escape closes the detail wherever it's shown.
+  // Escape closes whichever overlay is open.
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedId && !sharing) return
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
       const el = document.activeElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
       setSelectedId(null)
+      setSharing(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId])
+  }, [selectedId, sharing])
 
   const startFresh = useCallback(() => {
     api
       .createList()
-      .then((state) => openList(state.id))
+      .then((state) => openList(state.slug))
       .catch((failure: unknown) => setBootError(describe(failure)))
   }, [openList])
 
@@ -122,6 +131,10 @@ export function App() {
     />
   )
 
+  const share = sharing && list.slug && (
+    <ShareSheet slug={list.slug} onClose={() => setSharing(false)} onRename={list.rename} />
+  )
+
   return (
     <div className="shell">
       <main className="card" data-layout={wide ? 'wide' : 'compact'}>
@@ -129,15 +142,22 @@ export function App() {
           items={list.items}
           selectedId={wide ? selectedId : null}
           live={list.live}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            setSharing(false)
+            setSelectedId(id)
+          }}
           onToggle={list.toggleBought}
           onAdd={handleAdd}
+          onShare={() => {
+            setSelectedId(null)
+            setSharing(true)
+          }}
         />
 
         {wide ? (
-          <div className="card__right">{detail ?? <SummaryPane items={list.items} />}</div>
+          <div className="card__right">{share || detail || <SummaryPane items={list.items} />}</div>
         ) : (
-          detail && <div className="card__overlay">{detail}</div>
+          (share || detail) && <div className="card__overlay">{share || detail}</div>
         )}
       </main>
     </div>
