@@ -30,6 +30,32 @@ export function createApp() {
   app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1))
   app.disable('x-powered-by')
 
+  /**
+   * Vercel's catch-all functions do not always hand the app the URL the browser
+   * asked for. Depending on how the route was matched, the path segments can
+   * arrive moved into a `path` query parameter instead, leaving `req.url`
+   * pointing at the function file rather than `/api/lists/<id>`.
+   *
+   * Rebuilding the path here means every route below only ever sees `/api/...`,
+   * whichever shape arrived. A normal server hits the early return and this
+   * costs nothing.
+   */
+  app.use((req, _res, next) => {
+    if (req.url.startsWith('/api/')) return next()
+
+    const query = req.url.indexOf('?')
+    if (query === -1) return next()
+
+    const params = new URLSearchParams(req.url.slice(query + 1))
+    const segments = params.getAll('path').filter(Boolean)
+    if (segments.length === 0) return next()
+
+    params.delete('path')
+    const rest = params.toString()
+    req.url = `/api/${segments.join('/')}${rest ? `?${rest}` : ''}`
+    next()
+  })
+
   app.use(compression())
   app.use(express.json({ limit: '64kb' }))
 
@@ -175,6 +201,25 @@ export function createApp() {
    */
   app.use('/api', api)
   app.use('/', api)
+
+  /**
+   * A bare 404 from Express looks identical to a routing misconfiguration and
+   * tells nobody which it was. Echoing the path the app actually received turns
+   * "it just 404s" into a one-request diagnosis.
+   */
+  app.use((req, res, next) => {
+    // On Vercel the CDN serves the client, so anything reaching this function is
+    // API traffic. Self-hosted, the same app also serves dist/, so only claim
+    // /api here and let everything else fall through to the static handler.
+    const isApiTraffic = req.url.startsWith('/api') || Boolean(process.env.VERCEL)
+    if (!isApiTraffic) return next()
+
+    res.status(404).json({
+      error: 'No route matched inside the app.',
+      pathSeen: req.url,
+      originalUrl: req.originalUrl,
+    })
+  })
 
   // Express 5 forwards rejected promises here, so a database outage answers
   // with JSON the client can show rather than an empty 500.
