@@ -21,13 +21,32 @@ export function createItem(name: string, now: Date = new Date()): Item {
 }
 
 /**
- * `crypto.randomUUID` exists on modern web and on RN via `react-native-get-random-values`,
- * but we fall back so a missing polyfill degrades instead of crashing.
+ * The id has to be a UUID, not merely unique.
+ *
+ * The server keeps a client-supplied item id only if it matches `/^[0-9a-f-]{36}$/i`
+ * and mints its own otherwise — at which point the optimistic row on the client
+ * and the stored row on the server are two different items. On the web that
+ * never bites, because browsers have `randomUUID`. On the phone it would:
+ * Hermes has no `randomUUID`, react-native-get-random-values provides only
+ * `getRandomValues`, and a queued add that replays after a lost response would
+ * duplicate the row every time.
+ *
+ * So each step down degrades the randomness, never the shape.
  */
 function newId(): string {
   const c = globalThis.crypto
   if (c && typeof c.randomUUID === 'function') return c.randomUUID()
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
+  const bytes = new Uint8Array(16)
+  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(bytes)
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+
+  // Version 4, variant 1 — the bits that make it a well-formed random UUID.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 /** Still-to-buy items, in the order they were added. */

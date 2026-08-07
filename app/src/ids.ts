@@ -15,13 +15,6 @@
 const ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
 const LENGTH = 12
 
-export function newListId(): string {
-  let id = ''
-  for (let i = 0; i < LENGTH; i++) {
-    id += ALPHABET[Math.floor(Math.random() * ALPHABET.length)]
-  }
-  return id
-}
 
 export function isListId(value: unknown): boolean {
   return typeof value === 'string' && new RegExp(`^[${ALPHABET}]{${LENGTH}}$`).test(value)
