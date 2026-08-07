@@ -13,7 +13,8 @@ import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium'
 import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold'
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold'
 import * as Items from '@domain/items'
-import { store } from './src/localStore'
+import { api } from './src/api'
+import { mirror } from './src/mirror'
 import { LAST_LIST_KEY, storage } from './src/storage'
 import { describe, useSyncedList } from './src/useSyncedList'
 import { ListScreen } from './src/ListScreen'
@@ -62,7 +63,7 @@ export default function App() {
         const remembered = await storage.get(LAST_LIST_KEY)
         if (remembered) return openList(remembered)
 
-        openList((await store.createList()).slug)
+        openList((await api.createList()).slug)
       } catch (failure) {
         setBootError(describe(failure))
       } finally {
@@ -94,7 +95,7 @@ export default function App() {
 
   const startFresh = useCallback(() => {
     setBootError(null)
-    store
+    api
       .createList()
       .then((state) => openList(state.slug))
       .catch((failure: unknown) => setBootError(describe(failure)))

@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import type { Item } from '@domain/types'
 import * as Items from '@domain/items'
-import { StoreError, type ListState, store } from './localStore'
+import { StoreError, type ListState, mirror } from './mirror'
 import { storage } from './storage'
 
 const TYPING_SETTLE_MS = 450
@@ -71,7 +71,7 @@ export function useSyncedList(listId: string | null): SyncedList {
   const reconcile = useCallback(async () => {
     if (!listId) return
     try {
-      adopt(await store.getList(listId))
+      adopt(await mirror.getList(listId))
     } catch {
       // The list went away underneath us. The next interaction will say so.
     }
@@ -116,7 +116,7 @@ export function useSyncedList(listId: string | null): SyncedList {
       setItems((current) => (current.length === 0 ? safeParse(raw) : current))
     })
 
-    store
+    mirror
       .getList(listId)
       .then((state) => {
         if (cancelled) return
@@ -159,7 +159,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       void (async () => {
         try {
-          const state = await store.patchItem(listId, itemId, patch)
+          const state = await mirror.patchItem(listId, itemId, patch)
           if (inFlight.current === 1) adopt(state)
         } catch {
           stale.current = true
@@ -211,7 +211,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const item = Items.createItem(trimmed)
       setItems((prev) => [...prev, item])
-      void write(() => store.addItem(listId, { id: item.id, name: item.name }))
+      void write(() => mirror.addItem(listId, { id: item.id, name: item.name }))
       return item
     },
     [listId, write],
@@ -227,7 +227,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const next = !current.bought
       setItems((prev) => Items.toggleBought(prev, id))
-      void write(() => store.patchItem(listId, id, { bought: next }))
+      void write(() => mirror.patchItem(listId, id, { bought: next }))
     },
     [flush, listId, write],
   )
@@ -245,7 +245,7 @@ export function useSyncedList(listId: string | null): SyncedList {
       }
 
       setItems((prev) => Items.removeItem(prev, id))
-      void write(() => store.removeItem(listId, id))
+      void write(() => mirror.removeItem(listId, id))
     },
     [endWrite, listId, write],
   )
@@ -255,7 +255,7 @@ export function useSyncedList(listId: string | null): SyncedList {
       if (!listId) return 'Not ready yet.'
       inFlight.current++
       try {
-        adopt(await store.renameList(listId, next))
+        adopt(await mirror.renameList(listId, next))
         return null
       } catch (failure) {
         return describe(failure)
