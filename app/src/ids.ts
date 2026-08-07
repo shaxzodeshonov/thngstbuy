@@ -1,16 +1,20 @@
 /**
- * Ported from server/ids.js. The shapes are identical so a list created here
- * looks like one the server would have made, but the reasoning behind them has
- * changed: on the server an id is the only access control there is, because the
- * URL is the credential. Nothing leaves this phone, so an id here is just a key
- * in a local table. That is why `newListId` uses `Math.random` and does not
- * reach for a crypto polyfill — there is nobody to guess it from.
+ * Ported from server/ids.js, and now only the reading half of it.
+ *
+ * Minting a list id belongs to the server: the id is the only access control
+ * this app has, because the URL is the credential, and it has to be unguessable
+ * to everyone rather than merely unique on one phone.
+ *
+ * What is left is validation — `slugProblem` in particular, which lets the Name
+ * screen reject a name before a request is spent finding out. The rules must
+ * stay identical to the server's or the screen will accept names it then
+ * refuses, which reads as a bug in the app rather than in the name.
  */
 
 /**
  * Crockford base32 minus the letters that get misread when someone reads an id
- * aloud or retypes it (i, l, o, u). Kept because the id is still shown to you
- * on the rename screen.
+ * aloud or retypes it (i, l, o, u). Kept because a generated id is still a name
+ * a list can be opened under, and is shown on the rename screen.
  */
 const ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz'
 const LENGTH = 12
