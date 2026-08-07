@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { Plus } from './Icons'
-import { PAD, color, font } from './theme'
+import { FOOT_BOTTOM, PAD, color, font } from './theme'
 
 /**
  * The bottom line of the list. Submitting keeps the keyboard up so several
@@ -52,6 +52,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: color.line,
     paddingTop: 22,
+    // Without this the add row sits directly on the gesture bar. The safe-area
+    // inset stops it being *under* the bar; it does not stop it touching it.
+    paddingBottom: FOOT_BOTTOM,
     paddingHorizontal: PAD,
   },
   input: {

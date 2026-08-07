@@ -2,22 +2,25 @@ import { useEffect, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ChevronLeft } from './Icons'
 import { slugProblem } from './ids'
-import { PAD, color, fieldLabel, font, label } from './theme'
+import { HEAD_TOP, PAD, color, fieldLabel, font, label } from './theme'
 
 type NameScreenProps = {
   slug: string
   onClose(): void
   onRename(next: string): Promise<string | null>
+  /** Leaves this list and asks which one to open instead. */
+  onSwitch(): void
 }
 
 /**
- * Was ShareScreen, when there was a server to share a link to. Everything lives
- * on this device now, so the link, the copy button and the send button are gone
- * — there is nothing on the other end of them. What is left is the half that
- * still means something: a list can be given a name, and the name is how you
- * recognise it.
+ * Naming a list, and leaving it.
+ *
+ * The name is also the link, so this screen is where both live. Switching lists
+ * is here rather than in the header because it is rare and slightly destructive
+ * — it puts the app back to its opening question — and the header is for the
+ * things you do every time.
  */
-export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
+export function NameScreen({ slug, onClose, onRename, onSwitch }: NameScreenProps) {
   const [draft, setDraft] = useState(slug)
   const [problem, setProblem] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -56,11 +59,12 @@ export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Name this list</Text>
         <Text style={styles.lead}>
-          This list is stored on this phone. Nothing is uploaded, and nothing else can read it.
+          The name is the link. Anyone you send it to can open this list and edit it, so a short
+          name is easier to share and easier for anyone else to guess.
         </Text>
 
         <Text style={styles.current} selectable>
-          {slug}
+          thngstbuy.vercel.app/l/{slug}
         </Text>
 
         <View style={styles.rename}>
@@ -84,7 +88,8 @@ export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
 
           <Text style={styles.note}>
             A name like <Text style={styles.em}>shaxzod</Text> is easier to recognise than the
-            generated one. Renaming changes nothing about what's in the list.
+            generated one. Renaming changes nothing about what's in the list, and a link you have
+            already sent someone keeps working.
           </Text>
 
           {problem && <Text style={styles.problem}>{problem}</Text>}
@@ -97,6 +102,22 @@ export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
             <Text style={styles.buttonLabel}>{saving ? 'Saving' : 'Save name'}</Text>
           </Pressable>
         </View>
+
+        <View style={styles.switch}>
+          <Text style={styles.fieldLabel}>Another list</Text>
+          <Text style={styles.note}>
+            Open a different list from a link. This one stays where it is — it lives on the server,
+            not on this phone, so nothing is lost by leaving it.
+          </Text>
+
+          <Pressable
+            style={[styles.button, styles.save]}
+            onPress={onSwitch}
+            accessibilityRole="button"
+          >
+            <Text style={styles.buttonLabel}>Open another list</Text>
+          </Pressable>
+        </View>
       </ScrollView>
     </View>
   )
@@ -104,7 +125,13 @@ export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.surface },
-  head: { flexDirection: 'row', minHeight: 26, paddingHorizontal: PAD, paddingBottom: 26 },
+  head: {
+    flexDirection: 'row',
+    minHeight: 26,
+    paddingHorizontal: PAD,
+    paddingTop: HEAD_TOP,
+    paddingBottom: 26,
+  },
   body: { paddingHorizontal: PAD, paddingBottom: PAD },
 
   title: { fontFamily: font.bold, fontSize: 26, letterSpacing: -0.57, color: color.ink },
@@ -124,7 +151,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
     fontFamily: font.regular,
-    fontSize: 15.5,
+    fontSize: 14,
     color: color.ink,
   },
 
@@ -140,6 +167,12 @@ const styles = StyleSheet.create({
   save: { marginTop: 20, alignSelf: 'flex-start' },
   disabled: { opacity: 0.4 },
 
+  switch: {
+    marginTop: 38,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.line,
+    paddingTop: 20,
+  },
   rename: {
     marginTop: 38,
     borderTopWidth: StyleSheet.hairlineWidth,

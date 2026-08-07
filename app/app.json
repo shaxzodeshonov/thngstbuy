@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "Things to buy",
+    "name": "thngstobuy",
     "slug": "thngstbuy",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "scheme": "thngstbuy",
@@ -19,6 +20,7 @@
     "android": {
       "package": "app.thngstbuy.client",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAF9F6"
       },
       "intentFilters": [
@@ -32,10 +34,23 @@
               "pathPrefix": "/l"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
-    "plugins": ["expo-status-bar", "expo-font", "expo-sqlite"]
+    "plugins": [
+      "expo-status-bar",
+      "expo-font",
+      "expo-sqlite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f513685d-c326-4301-92bb-cd04a20d3bee"
+      }
+    },
+    "owner": "shaxzodes-team"
   }
 }

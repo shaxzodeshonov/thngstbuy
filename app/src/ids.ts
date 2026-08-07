@@ -67,6 +67,38 @@ export function isListRef(value: unknown): boolean {
   return isListId(value) || isSlug(value)
 }
 
+/**
+ * Turns whatever someone pastes into a list to open, or null.
+ *
+ * People will paste the whole link, because that is what they were sent. They
+ * will also type just the name, because that is what they remember. Both are the
+ * same intent, and the difference between them is not the user's problem.
+ *
+ * Accepts, all case-insensitively and ignoring surrounding space:
+ *   https://thngstbuy.vercel.app/l/shaxzod    a shared link
+ *   thngstbuy.vercel.app/l/shaxzod            the link without its scheme
+ *   thngstbuy://l/shaxzod                     the app's own deep link
+ *   shaxzod                                   a chosen name
+ *   k3n2p9wxyz01                              a generated id
+ */
+export function parseListRef(input: unknown): string | null {
+  if (typeof input !== 'string') return null
+
+  let text = input.trim().toLowerCase()
+  if (!text) return null
+
+  // Anything after /l/ is the name. Everything before it is a host we do not
+  // need to check: a link to somebody else's deployment still names a list, and
+  // failing on it here would be a worse message than the 404 that follows.
+  const path = /\/l\/([^/?#\s]+)/.exec(text)
+  if (path) text = path[1]
+
+  // A bare paste can still carry a trailing slash, query or fragment.
+  text = text.replace(/[/?#].*$/, '')
+
+  return isListRef(text) ? text : null
+}
+
 export function slugProblem(value: unknown): string | null {
   if (typeof value !== 'string' || value.trim() === '') return 'Pick a name first.'
   const name = value.trim().toLowerCase()

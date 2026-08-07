@@ -5,7 +5,7 @@ import * as Items from '@domain/items'
 import { formatCount, formatMoney } from '@domain/format'
 import { ItemRow } from './ItemRow'
 import { AddBar } from './AddBar'
-import { PAD, color, font, label } from './theme'
+import { HEAD_TOP, PAD, color, font, label, wordmark } from './theme'
 
 type ListScreenProps = {
   items: Item[]
@@ -42,7 +42,7 @@ export function ListScreen({
     <View style={styles.screen}>
       <View style={styles.head}>
         <View>
-          <Text style={styles.title}>Things to buy</Text>
+          <Text style={styles.title}>thngstobuy</Text>
           <SyncNote live={live} unsent={unsent} />
         </View>
         <View style={styles.headRight}>
@@ -121,9 +121,10 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     paddingHorizontal: PAD,
+    paddingTop: HEAD_TOP,
     paddingBottom: 30,
   },
-  title: { ...label, color: color.accent },
+  title: { ...wordmark, color: color.accent },
   syncNote: { fontFamily: font.regular, fontSize: 12, color: color.inkFaint, marginTop: 5 },
   headRight: { flexDirection: 'row', alignItems: 'baseline', gap: 16 },
   share: { ...label, color: color.inkFaint },
