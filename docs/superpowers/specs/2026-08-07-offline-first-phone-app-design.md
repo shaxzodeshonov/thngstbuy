@@ -1,7 +1,7 @@
 # Offline-first phone app, synced to the server
 
 **Date:** 2026-08-07
-**Status:** approved, not yet implemented
+**Status:** implemented 2026-08-07
 **Scope:** `app/`, one line of `server/db.js`, the phone sections of `README.md`
 
 ## What this changes
