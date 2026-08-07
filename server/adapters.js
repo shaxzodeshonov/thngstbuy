@@ -75,10 +75,16 @@ async function createFileAdapter() {
     return stmt
   }
 
+  // Turso answers every statement with a rows array, so anything here that
+  // reads must go through `all()` too. PRAGMA belongs in this list: the schema
+  // migration asks `table_info` whether a column exists, and an empty answer
+  // reads as "missing" and re-runs an ALTER that has already happened.
+  const reads = /^\s*(select|pragma|with|explain)/i
+
   return {
     async execute(sql, args = []) {
       const stmt = prepare(sql)
-      if (/^\s*select/i.test(sql)) return { rows: stmt.all(...args), rowsAffected: 0 }
+      if (reads.test(sql)) return { rows: stmt.all(...args), rowsAffected: 0 }
       const result = stmt.run(...args)
       return { rows: [], rowsAffected: Number(result.changes ?? 0) }
     },

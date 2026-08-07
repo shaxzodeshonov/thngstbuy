@@ -13,15 +13,15 @@ import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium'
 import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold'
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold'
 import * as Items from '@domain/items'
-import { api } from './src/api'
+import { store } from './src/localStore'
 import { LAST_LIST_KEY, storage } from './src/storage'
 import { describe, useSyncedList } from './src/useSyncedList'
 import { ListScreen } from './src/ListScreen'
 import { DetailScreen } from './src/DetailScreen'
-import { ShareScreen } from './src/ShareScreen'
+import { NameScreen } from './src/NameScreen'
 import { PAD, color, font, label } from './src/theme'
 
-/** Pulls the list name out of a deep link, e.g. https://…/l/shaxzod. */
+/** Pulls the list name out of a deep link, e.g. thngstbuy://l/shaxzod. */
 function listFromUrl(url: string | null): string | null {
   if (!url) return null
   return /\/l\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])/.exec(url)?.[1] ?? null
@@ -62,7 +62,7 @@ export default function App() {
         const remembered = await storage.get(LAST_LIST_KEY)
         if (remembered) return openList(remembered)
 
-        openList((await api.createList()).slug)
+        openList((await store.createList()).slug)
       } catch (failure) {
         setBootError(describe(failure))
       } finally {
@@ -80,7 +80,7 @@ export default function App() {
   const list = useSyncedList(listId)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [sharing, setSharing] = useState(false)
+  const [naming, setNaming] = useState(false)
   const selected = list.items.find((i) => i.id === selectedId) ?? null
 
   useEffect(() => {
@@ -94,7 +94,7 @@ export default function App() {
 
   const startFresh = useCallback(() => {
     setBootError(null)
-    api
+    store
       .createList()
       .then((state) => openList(state.slug))
       .catch((failure: unknown) => setBootError(describe(failure)))
@@ -121,8 +121,8 @@ export default function App() {
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
           {problem ? (
             <Notice
-              title="Can't reach the list"
-              body="The server answered with an error."
+              title="Can't open the list"
+              body="Something went wrong reading it from this device."
               detail={problem}
               actionLabel="Try again"
               onPress={startFresh}
@@ -130,16 +130,16 @@ export default function App() {
           ) : list.status === 'missing' ? (
             <Notice
               title="This list is gone"
-              body="The link doesn't point at anything — it may have been mistyped, or the list was never created."
+              body="Nothing on this device has that name — it may have been renamed, or removed when the app's data was cleared."
               actionLabel="Start a new list"
               onPress={startFresh}
             />
           ) : !listId || list.status === 'loading' ? (
             <Splash />
-          ) : sharing && list.slug ? (
-            <ShareScreen
+          ) : naming && list.slug ? (
+            <NameScreen
               slug={list.slug}
-              onClose={() => setSharing(false)}
+              onClose={() => setNaming(false)}
               onRename={list.rename}
             />
           ) : selected ? (
@@ -157,12 +157,11 @@ export default function App() {
           ) : (
             <ListScreen
               items={list.items}
-              live={list.live}
               onOpen={setSelectedId}
               onToggle={list.toggleBought}
               onDelete={handleDelete}
               onAdd={list.add}
-              onShare={() => setSharing(true)}
+              onRename={() => setNaming(true)}
             />
           )}
         </SafeAreaView>

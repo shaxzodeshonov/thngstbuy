@@ -1,27 +1,32 @@
 /**
- * The list, shared. Ported from the web app's src/data/useSyncedList.ts — the
- * reconciliation rules are identical, because the failure they prevent is the
- * same on both. Only three things changed: AppState replaces the browser's
- * visibility events, timer types are React Native's, and there is no
- * `window`.
+ * The list. Ported from the web app's src/data/useSyncedList.ts, then trimmed
+ * when the backend became a SQLite file on this device rather than a server.
  *
- *  1. A server snapshot is only adopted when this client has no writes in
- *     flight. Otherwise it's marked stale and re-fetched once the writes settle,
- *     so we converge without ever reverting a keystroke the user just made.
- *  2. Text edits are debounced per item and sent as field-level patches, so two
- *     people editing different fields of the same thing don't overwrite each
- *     other.
+ * Two of the three original rules survive the move, because what they protect
+ * against is local:
+ *
+ *  1. A snapshot is only adopted when there are no writes in flight. A write
+ *     returns the whole new state, and a slow one landing after a faster one
+ *     would otherwise put a stale copy on screen.
+ *  2. Text edits are debounced per item and written as field-level patches, so
+ *     a `why` still inside its debounce window can't carry an old `name` back
+ *     into the row with it.
+ *
+ * The third — polling for someone else's changes — is gone. Nothing but this
+ * app can write to the database, so a timer asking every three seconds could
+ * only ever find its own last write, at the cost of waking the device for it.
+ * Backgrounding still flushes the debounce buffers, which is the one thing the
+ * AppState listener was really needed for.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import type { Item } from '@domain/types'
 import * as Items from '@domain/items'
-import { ApiError, type ListState, api } from './api'
+import { StoreError, type ListState, store } from './localStore'
 import { storage } from './storage'
 
 const TYPING_SETTLE_MS = 450
-const POLL_MS = 3000
 
 export type SyncStatus = 'loading' | 'ready' | 'missing' | 'error'
 
@@ -29,7 +34,6 @@ export type SyncedList = {
   items: Item[]
   status: SyncStatus
   error: string | null
-  live: boolean
   slug: string | null
   add(name: string): Item | null
   update(id: string, patch: Partial<Item>): void
@@ -44,24 +48,21 @@ export function useSyncedList(listId: string | null): SyncedList {
   const [items, setItems] = useState<Item[]>([])
   const [status, setStatus] = useState<SyncStatus>('loading')
   const [error, setError] = useState<string | null>(null)
-  const [live, setLive] = useState(false)
   const [slug, setSlug] = useState<string | null>(null)
 
   const inFlight = useRef(0)
   const stale = useRef(false)
-  const version = useRef(-1)
   const buffers = useRef(new Map<string, { patch: Partial<Item>; timer: Timer }>())
 
   /**
    * Mirrors `items` for callbacks that need the current value now. A `setItems`
    * updater runs during render, so anything read inside one is not available to
-   * the request being fired alongside it.
+   * the write being fired alongside it.
    */
   const itemsRef = useRef(items)
   itemsRef.current = items
 
   const adopt = useCallback((state: ListState) => {
-    version.current = state.version
     setSlug(state.slug)
     setItems(state.items)
     void storage.set(cacheKey(state.slug), JSON.stringify(state.items))
@@ -70,9 +71,9 @@ export function useSyncedList(listId: string | null): SyncedList {
   const reconcile = useCallback(async () => {
     if (!listId) return
     try {
-      adopt(await api.getList(listId))
+      adopt(await store.getList(listId))
     } catch {
-      // Offline. The next poll will resync.
+      // The list went away underneath us. The next interaction will say so.
     }
   }, [adopt, listId])
 
@@ -99,18 +100,23 @@ export function useSyncedList(listId: string | null): SyncedList {
     [adopt, endWrite],
   )
 
-  /* --------------------------------------------------------- load + poll */
+  /* --------------------------------------------------------------- loading */
 
   useEffect(() => {
     if (!listId) return
     let cancelled = false
 
+    /**
+     * The cached copy paints first. Reading SQLite is fast, but it is still a
+     * round trip through a native module, and the list is what the app is —
+     * showing it a frame early is worth the twenty lines.
+     */
     void storage.get(cacheKey(listId)).then((raw) => {
       if (cancelled || !raw) return
       setItems((current) => (current.length === 0 ? safeParse(raw) : current))
     })
 
-    api
+    store
       .getList(listId)
       .then((state) => {
         if (cancelled) return
@@ -119,7 +125,7 @@ export function useSyncedList(listId: string | null): SyncedList {
       })
       .catch((failure: unknown) => {
         if (cancelled) return
-        if (failure instanceof ApiError && failure.status === 404) {
+        if (failure instanceof StoreError && failure.code === 'missing') {
           setStatus('missing')
           return
         }
@@ -132,60 +138,7 @@ export function useSyncedList(listId: string | null): SyncedList {
     }
   }, [adopt, listId])
 
-  /**
-   * Only a foregrounded app polls. Backgrounded, there is nobody looking and
-   * the requests would burn battery and hosting quota for nothing. Coming back
-   * to the foreground checks straight away, so it is current the moment it is
-   * on screen.
-   */
-  useEffect(() => {
-    if (!listId || status !== 'ready') return
-
-    let stopped = false
-    let timer: Timer | undefined
-
-    async function check() {
-      if (stopped || !listId) return
-      if (AppState.currentState !== 'active' || inFlight.current > 0) return
-
-      try {
-        const { version: latest } = await api.getVersion(listId)
-        setLive(true)
-        if (stopped || latest === version.current) return
-
-        const state = await api.getList(listId)
-        if (!stopped && inFlight.current === 0) adopt(state)
-      } catch {
-        setLive(false)
-      }
-    }
-
-    function schedule() {
-      timer = setTimeout(async () => {
-        await check()
-        if (!stopped) schedule()
-      }, POLL_MS)
-    }
-
-    void check()
-    schedule()
-
-    const subscription = AppState.addEventListener('change', (next) => {
-      if (next === 'active') void check()
-      // Anything still inside the debounce window goes out now: backgrounding
-      // can be the last thing that happens to an app.
-      else flushAll()
-    })
-
-    return () => {
-      stopped = true
-      if (timer) clearTimeout(timer)
-      subscription.remove()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adopt, listId, status])
-
-  /* ------------------------------------------------------------ mutations */
+  /* ------------------------------------------------------------- mutations */
 
   const flush = useCallback(
     (itemId: string) => {
@@ -206,7 +159,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       void (async () => {
         try {
-          const state = await api.patchItem(listId, itemId, patch)
+          const state = await store.patchItem(listId, itemId, patch)
           if (inFlight.current === 1) adopt(state)
         } catch {
           stale.current = true
@@ -221,6 +174,18 @@ export function useSyncedList(listId: string | null): SyncedList {
   const flushAll = useCallback(() => {
     for (const id of [...buffers.current.keys()]) flush(id)
   }, [flush])
+
+  /**
+   * Anything still inside the debounce window goes out now: backgrounding can
+   * be the last thing that happens to an app before Android reclaims it, and a
+   * dropped buffer is a sentence the user typed and watched disappear.
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') flushAll()
+    })
+    return () => subscription.remove()
+  }, [flushAll])
 
   const update = useCallback(
     (id: string, patch: Partial<Item>) => {
@@ -246,7 +211,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const item = Items.createItem(trimmed)
       setItems((prev) => [...prev, item])
-      void write(() => api.addItem(listId, { id: item.id, name: item.name }))
+      void write(() => store.addItem(listId, { id: item.id, name: item.name }))
       return item
     },
     [listId, write],
@@ -262,7 +227,7 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const next = !current.bought
       setItems((prev) => Items.toggleBought(prev, id))
-      void write(() => api.patchItem(listId, id, { bought: next }))
+      void write(() => store.patchItem(listId, id, { bought: next }))
     },
     [flush, listId, write],
   )
@@ -280,17 +245,17 @@ export function useSyncedList(listId: string | null): SyncedList {
       }
 
       setItems((prev) => Items.removeItem(prev, id))
-      void write(() => api.removeItem(listId, id))
+      void write(() => store.removeItem(listId, id))
     },
     [endWrite, listId, write],
   )
 
   const rename = useCallback(
     async (next: string): Promise<string | null> => {
-      if (!listId) return 'Not connected yet.'
+      if (!listId) return 'Not ready yet.'
       inFlight.current++
       try {
-        adopt(await api.renameList(listId, next))
+        adopt(await store.renameList(listId, next))
         return null
       } catch (failure) {
         return describe(failure)
@@ -309,13 +274,13 @@ export function useSyncedList(listId: string | null): SyncedList {
     }
   }, [])
 
-  return { items, status, error, live, slug, add, update, toggleBought, remove, rename }
+  return { items, status, error, slug, add, update, toggleBought, remove, rename }
 }
 
 const cacheKey = (listId: string) => `thngstbuy.cache.${listId}`
 
 export function describe(failure: unknown): string {
-  if (failure instanceof ApiError) return `HTTP ${failure.status} — ${failure.message}`
+  if (failure instanceof StoreError) return failure.message
   if (failure instanceof Error) return failure.message
   return String(failure)
 }

@@ -15,3 +15,6 @@ dist
 
 # Machine-specific Claude Code permissions; launch.json is shared on purpose.
 .claude/settings.local.json
+
+.vercel
+.env*

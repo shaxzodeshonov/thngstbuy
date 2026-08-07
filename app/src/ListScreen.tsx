@@ -9,22 +9,20 @@ import { PAD, color, font, label } from './theme'
 
 type ListScreenProps = {
   items: Item[]
-  live: boolean
   onOpen(id: string): void
   onToggle(id: string): void
   onDelete(id: string): void
   onAdd(name: string): void
-  onShare(): void
+  onRename(): void
 }
 
 export function ListScreen({
   items,
-  live,
   onOpen,
   onToggle,
   onDelete,
   onAdd,
-  onShare,
+  onRename,
 }: ListScreenProps) {
   const [showBought, setShowBought] = useState(false)
 
@@ -37,9 +35,8 @@ export function ListScreen({
       <View style={styles.head}>
         <Text style={styles.title}>Things to buy</Text>
         <View style={styles.headRight}>
-          {!live && <View style={styles.offline} accessibilityLabel="Offline" />}
-          <Pressable onPress={onShare} hitSlop={10} accessibilityRole="button">
-            <Text style={styles.share}>Share</Text>
+          <Pressable onPress={onRename} hitSlop={10} accessibilityRole="button">
+            <Text style={styles.share}>Name</Text>
           </Pressable>
           <Text style={styles.count}>{formatCount(pending.length)}</Text>
         </View>
@@ -99,13 +96,6 @@ const styles = StyleSheet.create({
   headRight: { flexDirection: 'row', alignItems: 'baseline', gap: 16 },
   share: { ...label, color: color.inkFaint },
   count: { ...label, color: color.inkFaint },
-  offline: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: color.accentSoft,
-    alignSelf: 'center',
-  },
 
   scroll: { flex: 1 },
   scrollBody: { paddingBottom: 12 },

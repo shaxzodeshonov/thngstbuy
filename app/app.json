@@ -14,25 +14,14 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.thngstbuy.client",
-      "associatedDomains": ["applinks:thngstbuy.vercel.app"]
+      "bundleIdentifier": "app.thngstbuy.client"
     },
     "android": {
       "package": "app.thngstbuy.client",
-      "edgeToEdgeEnabled": true,
-      "adaptiveIcon": { "backgroundColor": "#FAF9F6" },
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "thngstbuy.vercel.app", "pathPrefix": "/l" }],
-          "category": ["BROWSABLE", "DEFAULT"]
-        }
-      ]
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF9F6"
+      }
     },
-    "plugins": ["expo-status-bar", "expo-font"],
-    "extra": {
-      "apiBaseUrl": "https://thngstbuy.vercel.app"
-    }
+    "plugins": ["expo-status-bar", "expo-font", "expo-sqlite"]
   }
 }

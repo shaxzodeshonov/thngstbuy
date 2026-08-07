@@ -1,87 +1,77 @@
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native'
-import * as Clipboard from 'expo-clipboard'
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 import { ChevronLeft } from './Icons'
-import { api } from './api'
+import { slugProblem } from './ids'
 import { PAD, color, fieldLabel, font, label } from './theme'
 
-type ShareScreenProps = {
+type NameScreenProps = {
   slug: string
   onClose(): void
   onRename(next: string): Promise<string | null>
 }
 
-/** The link, and the one place it can be renamed. Mirrors the website's sheet. */
-export function ShareScreen({ slug, onClose, onRename }: ShareScreenProps) {
+/**
+ * Was ShareScreen, when there was a server to share a link to. Everything lives
+ * on this device now, so the link, the copy button and the send button are gone
+ * — there is nothing on the other end of them. What is left is the half that
+ * still means something: a list can be given a name, and the name is how you
+ * recognise it.
+ */
+export function NameScreen({ slug, onClose, onRename }: NameScreenProps) {
   const [draft, setDraft] = useState(slug)
   const [problem, setProblem] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [copied, setCopied] = useState(false)
 
-  const url = `${api.baseUrl}/l/${slug}`
-  const changed = draft.trim().toLowerCase() !== slug
+  const next = draft.trim().toLowerCase()
+  const changed = next !== slug
 
   useEffect(() => setDraft(slug), [slug])
 
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 1800)
-    return () => clearTimeout(timer)
-  }, [copied])
-
   async function save() {
     if (!changed || saving) return
+
+    // Checked here as well as in the store so the answer is immediate; the
+    // store enforces it either way, because it is the thing holding the data.
+    const shape = slugProblem(next)
+    if (shape) return setProblem(shape)
+
     setSaving(true)
-    setProblem(await onRename(draft.trim().toLowerCase()))
+    setProblem(await onRename(next))
     setSaving(false)
   }
 
   return (
     <View style={styles.screen}>
       <View style={styles.head}>
-        <Pressable onPress={onClose} hitSlop={14} accessibilityRole="button" accessibilityLabel="Back to the list">
+        <Pressable
+          onPress={onClose}
+          hitSlop={14}
+          accessibilityRole="button"
+          accessibilityLabel="Back to the list"
+        >
           <ChevronLeft />
         </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Share this list</Text>
+        <Text style={styles.title}>Name this list</Text>
         <Text style={styles.lead}>
-          Anyone with this link can add, edit and delete things. There is no password.
+          This list is stored on this phone. Nothing is uploaded, and nothing else can read it.
         </Text>
 
-        <Text style={styles.url} selectable>
-          {url}
+        <Text style={styles.current} selectable>
+          {slug}
         </Text>
-
-        <View style={styles.buttons}>
-          <Pressable
-            style={[styles.button, copied && styles.buttonOn]}
-            onPress={async () => {
-              await Clipboard.setStringAsync(url)
-              setCopied(true)
-            }}
-          >
-            <Text style={[styles.buttonLabel, copied && styles.buttonLabelOn]}>
-              {copied ? 'Link copied' : 'Copy link'}
-            </Text>
-          </Pressable>
-
-          <Pressable style={styles.button} onPress={() => void Share.share({ message: url })}>
-            <Text style={styles.buttonLabel}>Send</Text>
-          </Pressable>
-        </View>
 
         <View style={styles.rename}>
           <Text style={styles.fieldLabel}>Custom name</Text>
 
           <View style={styles.input}>
-            <Text style={styles.prefix}>/l/</Text>
             <TextInput
               style={styles.field}
               value={draft}
-              onChangeText={(next) => {
-                setDraft(next)
+              onChangeText={(text) => {
+                setDraft(text)
                 setProblem(null)
               }}
               autoCapitalize="none"
@@ -93,8 +83,8 @@ export function ShareScreen({ slug, onClose, onRename }: ShareScreenProps) {
           </View>
 
           <Text style={styles.note}>
-            A name like <Text style={styles.em}>shaxzod</Text> is easy to remember — and easy for
-            anyone else to guess. Leave the generated one if this list should stay private.
+            A name like <Text style={styles.em}>shaxzod</Text> is easier to recognise than the
+            generated one. Renaming changes nothing about what's in the list.
           </Text>
 
           {problem && <Text style={styles.problem}>{problem}</Text>}
@@ -118,9 +108,15 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: PAD, paddingBottom: PAD },
 
   title: { fontFamily: font.bold, fontSize: 26, letterSpacing: -0.57, color: color.ink },
-  lead: { fontFamily: font.regular, fontSize: 14.5, lineHeight: 23, color: color.inkMuted, marginTop: 10 },
+  lead: {
+    fontFamily: font.regular,
+    fontSize: 14.5,
+    lineHeight: 23,
+    color: color.inkMuted,
+    marginTop: 10,
+  },
 
-  url: {
+  current: {
     marginTop: 26,
     padding: 14,
     borderRadius: 12,
@@ -128,11 +124,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.line,
     fontFamily: font.regular,
-    fontSize: 13.5,
+    fontSize: 15.5,
     color: color.ink,
   },
 
-  buttons: { flexDirection: 'row', gap: 10, marginTop: 14 },
   button: {
     borderWidth: 1,
     borderColor: color.lineStrong,
@@ -141,13 +136,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
   },
-  buttonOn: { backgroundColor: color.accent, borderColor: color.accent },
   buttonLabel: { ...label, color: color.accent },
-  buttonLabelOn: { color: color.surface },
   save: { marginTop: 20, alignSelf: 'flex-start' },
   disabled: { opacity: 0.4 },
 
-  rename: { marginTop: 38, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.line, paddingTop: 20 },
+  rename: {
+    marginTop: 38,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: color.line,
+    paddingTop: 20,
+  },
   fieldLabel: { ...fieldLabel },
   input: {
     flexDirection: 'row',
@@ -157,7 +155,6 @@ const styles = StyleSheet.create({
     borderBottomColor: color.lineStrong,
     paddingBottom: 8,
   },
-  prefix: { fontFamily: font.regular, fontSize: 15.5, color: color.inkFaint },
   field: { flex: 1, fontFamily: font.regular, fontSize: 15.5, color: color.ink, padding: 0 },
   note: { fontFamily: font.regular, fontSize: 13, lineHeight: 21, color: color.inkMuted, marginTop: 12 },
   em: { color: color.accent },

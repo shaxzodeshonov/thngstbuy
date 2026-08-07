@@ -273,16 +273,23 @@ src/
 
 ## The phone app
 
-`app/` is an Expo (React Native) client for the same backend. It talks to the
-deployed API, so anything added on a phone shows up on the website and the other
-way round.
+`app/` is an Expo (React Native) Android app, and it is **not** a client for the
+server above. It keeps its own SQLite database inside the app's storage, makes no
+network calls at all, and works with the phone in aeroplane mode. Nothing syncs
+between it and the website; a list on the phone is that phone's list.
+
+That is a deliberate fork, not an oversight. The website's whole premise is that
+the URL is the credential and anyone holding it can edit — which needs a server
+to hold the list. The app answers a different question: *the same list, on me,
+with no account and no connection.* Sharing is the price.
 
 ```bash
 cd app
 npm start
 ```
 
-Scan the QR code with Expo Go, or press `a` / `i` for an emulator.
+Scan the QR code with Expo Go, or press `a` for an emulator. To build something
+installable, see [Building the APK](#building-the-apk).
 
 The screens are a transcription of the website's phone layout — same tokens,
 same type scale, same hairlines, same warm surface edge to edge. Two things the
@@ -294,9 +301,12 @@ web version doesn't have:
   isn't undoable, so the swipe only offers it and the press commits — the same
   two-step as the website's arming trash button.
 
-Deep links work: opening `https://thngstbuy.vercel.app/l/<name>` on a phone with
-the app installed opens it there. The last list you used is remembered, so
-reopening the app doesn't scatter empty lists behind you.
+One thing it has lost: the header's **Share** became **Name**, and the sheet
+behind it dropped the link, the copy button and the send button. There is no
+server on the other end of a link any more. What is left is the half that still
+means something — a list can be given a name, and the name is how you recognise
+it. The last list you opened is remembered, so relaunching doesn't scatter empty
+lists behind you.
 
 ### What is shared, and what isn't
 
@@ -305,25 +315,71 @@ verbatim by both. Metro is pointed at that folder in
 [`app/metro.config.js`](app/metro.config.js) and resolves it under `@domain`, so
 there is one copy of `pendingTotal`, `parsePrice` and the rest.
 
-`app/src/useSyncedList.ts` is a port rather than a copy: the reconciliation rules
-are identical, but `AppState` replaces the browser's visibility events and the
-timer types are React Native's. `api.ts` differs only in needing an absolute URL.
+[`app/src/localStore.ts`](app/src/localStore.ts) is where the two halves part.
+It exposes the same eight methods `api.ts` did — `createList`, `getList`,
+`addItem`, `patchItem`, `removeItem`, `renameList`, `getVersion` — with the same
+arguments and the same "every write returns the whole new state" contract, so
+`useSyncedList` barely noticed the swap. Underneath, the schema and every
+statement are transcribed from [`server/db.js`](server/db.js). The two halves
+still agree about what a list *is*, even though nothing travels between them.
+
+`app/src/useSyncedList.ts` kept the optimistic-write and per-item debounce rules
+— a slow write landing after a fast one would still put a stale copy on screen,
+and a debounced `why` would still drag an old `name` back with it. It lost the
+3-second poll: nothing but the app itself can write to the database, so the timer
+could only ever have found its own last write.
 
 The UI is necessarily separate — CSS doesn't cross over — but
 [`app/src/theme.ts`](app/src/theme.ts) is a direct transcription of the web
 tokens, so the two stay in step by changing two files rather than by redesign.
 
+### Building the APK
+
+`npx expo prebuild --platform android` has been run, so `app/android/` exists
+(and is gitignored — it is generated, not authored). Two ways to turn it into
+something installable:
+
+**Expo's build service.** Nothing large to install locally; needs a free Expo
+account and internet *while building*. The APK it hands back needs neither.
+
+```bash
+cd app && npx eas-cli build --platform android --profile preview
+```
+
+**Locally.** Needs the Android SDK, and a **JDK 17 or 21** — React Native 0.86
+does not expect the JDK 26 that may already be on the machine, and the failure
+mode is an unhelpful "unsupported class file major version".
+
+```bash
+cd app/android && ./gradlew assembleRelease
+```
+
+The APK lands in `app/android/app/build/outputs/apk/release/`. Copy it to the
+phone and open it; Android will ask about installing from an unknown source.
+
+The app still declares `android.permission.INTERNET`, which Expo adds by default
+and `npx expo start` needs to reach Metro. Nothing in the shipped code opens a
+socket. Strip it from the release manifest if you want the guarantee to be
+structural rather than a claim.
+
 ### Not verified on a device
 
-The app typechecks and bundles for Android, and the shared domain code and
-gesture libraries resolve. What has not been exercised is the app actually
-running on a phone — swipe feel, keyboard behaviour, and font rendering need a
-real device. Run `npm start` in `app/` and tell me what breaks.
+The app typechecks, bundles for Android (1115 modules), and prebuilds cleanly,
+and every statement in `localStore.ts` has been run against real SQLite. What has
+not been exercised is the app running on a phone — swipe feel, keyboard
+behaviour, font rendering, and whether the first launch creates its database
+where it should. Build it, install it, and tell me what breaks.
 
 ## Notes from the port
 
 Kept for reference — this is what the move to React Native actually cost, now
 that `app/` exists.
+
+These notes describe the app while it was still a client for the server, and
+points 1 and 3 have since been overtaken: `api.ts` is gone, replaced by
+[`localStore.ts`](app/src/localStore.ts), and the offline cache became a cache
+in front of a local database rather than in front of the network. The rest still
+holds, and the list is worth keeping as a record of what actually bit.
 
 1. **`api.ts`** — `fetch` works in RN as-is. Point the base URL at your deployed
    host instead of the relative `/api`. (Polling rather than SSE turned out to be
