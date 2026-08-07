@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
@@ -13,19 +13,17 @@ import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium'
 import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold'
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold'
 import * as Items from '@domain/items'
-import { api } from './src/api'
+import { ApiError, api } from './src/api'
+import { shareUrl } from './src/config'
+import { mirror } from './src/mirror'
+import { parseListRef } from './src/ids'
 import { LAST_LIST_KEY, storage } from './src/storage'
 import { describe, useSyncedList } from './src/useSyncedList'
 import { ListScreen } from './src/ListScreen'
 import { DetailScreen } from './src/DetailScreen'
-import { ShareScreen } from './src/ShareScreen'
+import { NameScreen } from './src/NameScreen'
+import { OpenScreen } from './src/OpenScreen'
 import { PAD, color, font, label } from './src/theme'
-
-/** Pulls the list name out of a deep link, e.g. https://…/l/shaxzod. */
-function listFromUrl(url: string | null): string | null {
-  if (!url) return null
-  return /\/l\/([a-z0-9][a-z0-9-]{1,30}[a-z0-9])/.exec(url)?.[1] ?? null
-}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -37,50 +35,105 @@ export default function App() {
 
   const [listId, setListId] = useState<string | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
+  /** Nothing to show and nothing remembered: ask which list to open. */
+  const [needsList, setNeedsList] = useState(false)
   const opening = useRef(false)
   const incomingUrl = Linking.useURL()
 
   const openList = useCallback((id: string) => {
     setListId(id)
+    setNeedsList(false)
+    setBootError(null)
     void storage.set(LAST_LIST_KEY, id)
   }, [])
 
   /**
-   * Which list to show, in order of preference: one opened from a link, the one
-   * used last, or a fresh one. Minting only happens when the other two miss, so
-   * reopening the app doesn't scatter empty lists behind you.
+   * Opens a list the user named, having checked it is really there. Checking
+   * first is what makes a typo say "no list with that name" instead of dropping
+   * someone into an error screen for a list that never existed.
+   */
+  const openNamed = useCallback(
+    async (ref: string): Promise<string | null> => {
+      try {
+        await api.getList(ref)
+        openList(ref)
+        return null
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 404) {
+          return `No list called “${ref}”. Check the link, or start a new list.`
+        }
+        // Opening by name is the one thing that cannot be done offline: there is
+        // no local copy of a list this device has never seen.
+        if (await mirror.has(ref)) {
+          openList(ref)
+          return null
+        }
+        return "Couldn't reach the server. Check your connection and try again."
+      }
+    },
+    [openList],
+  )
+
+  const createList = useCallback(async (): Promise<string | null> => {
+    try {
+      openList((await api.createList()).slug)
+      return null
+    } catch {
+      return 'Starting a new list needs a connection, because the list lives on the server so it can be shared.'
+    }
+  }, [openList])
+
+  /**
+   * Which list to show, in order of preference: one opened from a link, then the
+   * one used last. If neither, ask — a fresh install used to mint a list on the
+   * spot, which meant someone who had been sent a link arrived at an empty list
+   * that wasn't the one they were coming for, with no way to say so.
    */
   useEffect(() => {
-    if (listId || opening.current) return
+    // `needsList` means the question is already on screen and waiting for an
+    // answer. Without it, leaving a list opened from a link would walk straight
+    // back into it, because the launch URL is still the launch URL.
+    if (listId || needsList || opening.current) return
     opening.current = true
 
     void (async () => {
       try {
-        const fromLink = listFromUrl(incomingUrl) ?? listFromUrl(await Linking.getInitialURL())
+        const fromLink =
+          parseListRef(incomingUrl) ?? parseListRef(await Linking.getInitialURL())
         if (fromLink) return openList(fromLink)
 
         const remembered = await storage.get(LAST_LIST_KEY)
         if (remembered) return openList(remembered)
 
-        openList((await api.createList()).slug)
+        setNeedsList(true)
       } catch (failure) {
         setBootError(describe(failure))
       } finally {
         opening.current = false
       }
     })()
-  }, [incomingUrl, listId, openList])
+  }, [incomingUrl, listId, needsList, openList])
 
-  // A link arriving while the app is already open switches lists.
+  /**
+   * A link arriving while the app is already open switches lists.
+   *
+   * Only when it is a link we have not already acted on. `useURL` keeps handing
+   * back the URL the app was launched from, so without this, deliberately
+   * leaving that list would be undone on the next render.
+   */
+  const handledUrl = useRef<string | null>(null)
   useEffect(() => {
-    const fromLink = listFromUrl(incomingUrl)
+    if (!incomingUrl || incomingUrl === handledUrl.current) return
+    handledUrl.current = incomingUrl
+
+    const fromLink = parseListRef(incomingUrl)
     if (fromLink && fromLink !== listId) openList(fromLink)
   }, [incomingUrl, listId, openList])
 
   const list = useSyncedList(listId)
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [sharing, setSharing] = useState(false)
+  const [naming, setNaming] = useState(false)
   const selected = list.items.find((i) => i.id === selectedId) ?? null
 
   useEffect(() => {
@@ -92,13 +145,18 @@ export default function App() {
     if (list.slug && listId && list.slug !== listId) openList(list.slug)
   }, [list.slug, listId, openList])
 
-  const startFresh = useCallback(() => {
+  /**
+   * Back to the opening question. This used to mint a list on the spot, which
+   * was the wrong move from a dead end: someone whose link failed usually wants
+   * to check the link, not to be handed a different empty list. Forgetting the
+   * remembered one is what stops the next launch walking straight back in.
+   */
+  const startOver = useCallback(() => {
     setBootError(null)
-    api
-      .createList()
-      .then((state) => openList(state.slug))
-      .catch((failure: unknown) => setBootError(describe(failure)))
-  }, [openList])
+    setListId(null)
+    setNeedsList(true)
+    void storage.set(LAST_LIST_KEY, '')
+  }, [])
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -107,6 +165,16 @@ export default function App() {
     },
     [list, selectedId],
   )
+
+  /**
+   * The link, over whatever the phone offers. The https form rather than the
+   * app's own scheme, because the person receiving it may not have the app —
+   * this way it opens in their browser, and in the app if they do.
+   */
+  const handleShare = useCallback(() => {
+    if (!list.slug) return
+    void Share.share({ message: shareUrl(list.slug) })
+  }, [list.slug])
 
   if (!fontsLoaded) return <Splash />
 
@@ -119,28 +187,36 @@ export default function App() {
             SafeAreaView's; only the icon colour is set here. */}
         <StatusBar style="dark" />
         <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-          {problem ? (
+          {needsList && !listId ? (
+            <OpenScreen onOpen={openNamed} onCreate={createList} />
+          ) : problem ? (
             <Notice
-              title="Can't reach the list"
-              body="The server answered with an error."
+              title="Can't open the list"
+              // A list this device has already seen opens offline, so reaching
+              // this screen means both the server and the local copy came up
+              // empty. Starting a new one is the only move, and it needs a
+              // connection — hence the detail line, which is the server's own
+              // words rather than a guess.
+              body="It isn't saved on this phone, and the server couldn't be reached to fetch it."
               detail={problem}
-              actionLabel="Try again"
-              onPress={startFresh}
+              actionLabel="Open another list"
+              onPress={startOver}
             />
           ) : list.status === 'missing' ? (
             <Notice
               title="This list is gone"
-              body="The link doesn't point at anything — it may have been mistyped, or the list was never created."
-              actionLabel="Start a new list"
-              onPress={startFresh}
+              body="The server has nothing under that name. It may have been renamed — a link made before the rename keeps working, but a name typed by hand does not."
+              actionLabel="Open another list"
+              onPress={startOver}
             />
           ) : !listId || list.status === 'loading' ? (
             <Splash />
-          ) : sharing && list.slug ? (
-            <ShareScreen
+          ) : naming && list.slug ? (
+            <NameScreen
               slug={list.slug}
-              onClose={() => setSharing(false)}
+              onClose={() => setNaming(false)}
               onRename={list.rename}
+              onSwitch={startOver}
             />
           ) : selected ? (
             <DetailScreen
@@ -158,11 +234,13 @@ export default function App() {
             <ListScreen
               items={list.items}
               live={list.live}
+              unsent={list.pending}
               onOpen={setSelectedId}
               onToggle={list.toggleBought}
               onDelete={handleDelete}
               onAdd={list.add}
-              onShare={() => setSharing(true)}
+              onRename={() => setNaming(true)}
+              onShare={handleShare}
             />
           )}
         </SafeAreaView>

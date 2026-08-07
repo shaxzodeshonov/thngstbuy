@@ -188,7 +188,15 @@ export async function addItem(listId, itemId, name) {
 
   await adapter.execute(
     `INSERT INTO items (id, list_id, name, price, model, where_to, why, added_at, bought, bought_at, position)
-     VALUES (?, ?, ?, NULL, '', '', '', ?, 0, NULL, ?)`,
+     VALUES (?, ?, ?, NULL, '', '', '', ?, 0, NULL, ?)
+     -- The client generates the id, so a collision means "this add already
+     -- landed", not "two things clashed". The phone queues writes while offline
+     -- and replays them, and a retry after a lost response would otherwise fail
+     -- the constraint, return 500, and wedge that list's queue for good.
+     --
+     -- DO NOTHING rather than an upsert: the retry carries the original name,
+     -- which must not overwrite an edit made in between.
+     ON CONFLICT(id) DO NOTHING`,
     [itemId, listId, name, now, num(rows[0].next)],
   )
 

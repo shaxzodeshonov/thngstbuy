@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "Things to buy",
+    "name": "thngstobuy",
     "slug": "thngstbuy",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "scheme": "thngstbuy",
@@ -14,25 +15,42 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.thngstbuy.client",
-      "associatedDomains": ["applinks:thngstbuy.vercel.app"]
+      "bundleIdentifier": "app.thngstbuy.client"
     },
     "android": {
       "package": "app.thngstbuy.client",
-      "edgeToEdgeEnabled": true,
-      "adaptiveIcon": { "backgroundColor": "#FAF9F6" },
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FAF9F6"
+      },
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "thngstbuy.vercel.app", "pathPrefix": "/l" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "thngstbuy.vercel.app",
+              "pathPrefix": "/l"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
-    "plugins": ["expo-status-bar", "expo-font"],
+    "plugins": [
+      "expo-status-bar",
+      "expo-font",
+      "expo-sqlite"
+    ],
     "extra": {
-      "apiBaseUrl": "https://thngstbuy.vercel.app"
-    }
+      "eas": {
+        "projectId": "f513685d-c326-4301-92bb-cd04a20d3bee"
+      }
+    },
+    "owner": "shaxzodes-team"
   }
 }

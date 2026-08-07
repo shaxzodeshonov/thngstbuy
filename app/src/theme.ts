@@ -23,8 +23,20 @@ export const color = {
   danger: '#A8574A',
 } as const
 
-/** Gutter inside the screen, matching the web's --pad at phone width. */
-export const PAD = 26
+/**
+ * Gutter inside the screen. The web's --pad at phone width is 26, which is
+ * right for a browser but too tight on a real handset: there is no address bar
+ * or window chrome between the list and the edge of the glass, so rows read as
+ * stuck to the side. Widened for the app rather than changed in the shared
+ * tokens, because the website does not have the problem.
+ */
+export const PAD = 34
+
+/** Space between the status bar and the first thing drawn under it. */
+export const HEAD_TOP = 12
+
+/** Space between the last thing drawn and the gesture bar. */
+export const FOOT_BOTTOM = 16
 
 export const font = {
   regular: 'Inter_400Regular',
@@ -43,6 +55,18 @@ export const label = {
   letterSpacing: 1.65,
   textTransform: 'uppercase',
   lineHeight: 13,
+} as const
+
+/**
+ * The app's name, set as a wordmark rather than a heading. Lowercase and only
+ * lightly tracked — `label`'s uppercase treatment turns a name that is already a
+ * compression of words into shouting.
+ */
+export const wordmark = {
+  fontFamily: font.semibold,
+  fontSize: 15,
+  letterSpacing: 0.2,
+  textTransform: 'none',
 } as const
 
 export const fieldLabel = {

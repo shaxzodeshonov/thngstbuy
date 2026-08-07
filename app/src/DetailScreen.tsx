@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import type { Item } from '@domain/types'
 import { formatCount, formatDate, formatMoney, parsePrice } from '@domain/format'
 import { Check, ChevronLeft, Trash } from './Icons'
-import { PAD, color, fieldLabel, font, label } from './theme'
+import { HEAD_TOP, PAD, color, fieldLabel, font, label } from './theme'
 
 type DetailScreenProps = {
   item: Item
@@ -210,6 +210,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 26,
     paddingHorizontal: PAD,
+    paddingTop: HEAD_TOP,
     paddingBottom: 26,
   },
   count: { ...label, color: color.inkFaint },
