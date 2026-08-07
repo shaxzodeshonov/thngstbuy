@@ -9,20 +9,28 @@ import { PAD, color, font, label } from './theme'
 
 type ListScreenProps = {
   items: Item[]
+  /** False when the last attempt to reach the server failed. */
+  live: boolean
+  /** Writes made here that the server has not acknowledged yet. */
+  unsent: number
   onOpen(id: string): void
   onToggle(id: string): void
   onDelete(id: string): void
   onAdd(name: string): void
   onRename(): void
+  onShare(): void
 }
 
 export function ListScreen({
   items,
+  live,
+  unsent,
   onOpen,
   onToggle,
   onDelete,
   onAdd,
   onRename,
+  onShare,
 }: ListScreenProps) {
   const [showBought, setShowBought] = useState(false)
 
@@ -33,8 +41,14 @@ export function ListScreen({
   return (
     <View style={styles.screen}>
       <View style={styles.head}>
-        <Text style={styles.title}>Things to buy</Text>
+        <View>
+          <Text style={styles.title}>Things to buy</Text>
+          <SyncNote live={live} unsent={unsent} />
+        </View>
         <View style={styles.headRight}>
+          <Pressable onPress={onShare} hitSlop={10} accessibilityRole="button">
+            <Text style={styles.share}>Share</Text>
+          </Pressable>
           <Pressable onPress={onRename} hitSlop={10} accessibilityRole="button">
             <Text style={styles.share}>Name</Text>
           </Pressable>
@@ -83,6 +97,23 @@ export function ListScreen({
   )
 }
 
+/**
+ * Says when the list on screen is ahead of the list on the server.
+ *
+ * Deliberately a line of small muted text rather than a badge or a spinner. The
+ * whole point of queueing writes is that the user does not have to care whether
+ * they have gone yet — this is here for the moment they wonder, not to be
+ * noticed the rest of the time. It renders nothing when there is nothing to say.
+ */
+function SyncNote({ live, unsent }: { live: boolean; unsent: number }) {
+  if (live && unsent === 0) return null
+
+  const what =
+    unsent > 0 ? `${unsent} change${unsent === 1 ? '' : 's'} to send` : 'Offline — changes are saved'
+
+  return <Text style={styles.syncNote}>{what}</Text>
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   head: {
@@ -93,6 +124,7 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   title: { ...label, color: color.accent },
+  syncNote: { fontFamily: font.regular, fontSize: 12, color: color.inkFaint, marginTop: 5 },
   headRight: { flexDirection: 'row', alignItems: 'baseline', gap: 16 },
   share: { ...label, color: color.inkFaint },
   count: { ...label, color: color.inkFaint },

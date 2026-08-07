@@ -1,32 +1,44 @@
 /**
- * The list. Ported from the web app's src/data/useSyncedList.ts, then trimmed
- * when the backend became a SQLite file on this device rather than a server.
+ * The list, as the screens see it.
  *
- * Two of the three original rules survive the move, because what they protect
- * against is local:
+ * Three layers meet here, and the order matters:
  *
- *  1. A snapshot is only adopted when there are no writes in flight. A write
- *     returns the whole new state, and a slow one landing after a faster one
- *     would otherwise put a stale copy on screen.
- *  2. Text edits are debounced per item and written as field-level patches, so
- *     a `why` still inside its debounce window can't carry an old `name` back
- *     into the row with it.
+ *  - `items` is React state, updated optimistically so a keystroke shows up in
+ *    the frame it was typed in.
+ *  - `mirror` is the device's copy, which survives the app being killed.
+ *  - `outbox` + `sync` are what eventually tell the server.
  *
- * The third — polling for someone else's changes — is gone. Nothing but this
- * app can write to the database, so a timer asking every three seconds could
- * only ever find its own last write, at the cost of waking the device for it.
- * Backgrounding still flushes the debounce buffers, which is the one thing the
- * AppState listener was really needed for.
+ * Every write goes to all three. The first is for the eye, the second is what
+ * the app reads on next launch, and the third is what makes this list the same
+ * list on someone else's phone.
+ *
+ * Two rules are inherited from the web app and still earn their place:
+ *
+ *  1. Text edits are debounced per item and written as field-level patches, so
+ *     a `why` still inside its debounce window cannot carry an old `name` back
+ *     into the row with it — and so two people editing different fields of the
+ *     same thing don't overwrite each other.
+ *  2. Backgrounding flushes those buffers, because on a phone it can be the last
+ *     thing that happens before the OS reclaims the process.
+ *
+ * The polling loop lives here rather than in `sync.ts` because only this layer
+ * knows whether anyone is looking at the screen.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 import type { Item } from '@domain/types'
 import * as Items from '@domain/items'
-import { StoreError, type ListState, mirror } from './mirror'
-import { storage } from './storage'
+import { ApiError, api } from './api'
+import { StoreError, mirror } from './mirror'
+import { BACKOFF_MS, type SyncState, createSyncer } from './sync'
+import { slugProblem } from './ids'
 
+/** How long to sit on keystrokes before writing them through. */
 const TYPING_SETTLE_MS = 450
+
+/** How often a foregrounded screen checks whether anyone else has changed it. */
+const POLL_MS = 3000
 
 export type SyncStatus = 'loading' | 'ready' | 'missing' | 'error'
 
@@ -34,11 +46,17 @@ export type SyncedList = {
   items: Item[]
   status: SyncStatus
   error: string | null
+  /** False when the last attempt to reach the server failed. */
+  live: boolean
+  /** Writes made here that the server has not acknowledged yet. */
+  pending: number
+  /** The list's name as the server knows it. Null until the first load lands. */
   slug: string | null
   add(name: string): Item | null
   update(id: string, patch: Partial<Item>): void
   toggleBought(id: string): void
   remove(id: string): void
+  /** Resolves to null on success, or a message explaining why the name failed. */
   rename(next: string): Promise<string | null>
 }
 
@@ -49,9 +67,11 @@ export function useSyncedList(listId: string | null): SyncedList {
   const [status, setStatus] = useState<SyncStatus>('loading')
   const [error, setError] = useState<string | null>(null)
   const [slug, setSlug] = useState<string | null>(null)
+  const [sync, setSync] = useState<SyncState>({ live: true, pending: 0 })
 
-  const inFlight = useRef(0)
-  const stale = useRef(false)
+  const syncer = useMemo(() => (listId ? createSyncer(listId) : null), [listId])
+
+  /** Debounced field patches, keyed by item id. */
   const buffers = useRef(new Map<string, { patch: Partial<Item>; timer: Timer }>())
 
   /**
@@ -62,88 +82,133 @@ export function useSyncedList(listId: string | null): SyncedList {
   const itemsRef = useRef(items)
   itemsRef.current = items
 
-  const adopt = useCallback((state: ListState) => {
-    setSlug(state.slug)
-    setItems(state.items)
-    void storage.set(cacheKey(state.slug), JSON.stringify(state.items))
-  }, [])
-
-  const reconcile = useCallback(async () => {
+  /** Re-reads the device's copy into React state. */
+  const reload = useCallback(async () => {
     if (!listId) return
     try {
-      adopt(await mirror.getList(listId))
+      const state = await mirror.getList(listId)
+      setSlug(state.slug)
+      // A buffered edit is newer than anything the mirror can know about, so it
+      // must not be overwritten by a reload that lands mid-typing.
+      if (buffers.current.size === 0) setItems(state.items)
     } catch {
-      // The list went away underneath us. The next interaction will say so.
+      // Not on this device. The load effect below decides what that means.
     }
-  }, [adopt, listId])
-
-  const endWrite = useCallback(() => {
-    inFlight.current = Math.max(0, inFlight.current - 1)
-    if (inFlight.current === 0 && stale.current) {
-      stale.current = false
-      void reconcile()
-    }
-  }, [reconcile])
-
-  const write = useCallback(
-    async (run: () => Promise<ListState>) => {
-      inFlight.current++
-      try {
-        const state = await run()
-        if (inFlight.current === 1) adopt(state)
-      } catch {
-        stale.current = true
-      } finally {
-        endWrite()
-      }
-    },
-    [adopt, endWrite],
-  )
+  }, [listId])
 
   /* --------------------------------------------------------------- loading */
 
   useEffect(() => {
-    if (!listId) return
+    if (!listId || !syncer) return
     let cancelled = false
 
-    /**
-     * The cached copy paints first. Reading SQLite is fast, but it is still a
-     * round trip through a native module, and the list is what the app is —
-     * showing it a frame early is worth the twenty lines.
-     */
-    void storage.get(cacheKey(listId)).then((raw) => {
-      if (cancelled || !raw) return
-      setItems((current) => (current.length === 0 ? safeParse(raw) : current))
-    })
-
-    mirror
-      .getList(listId)
-      .then((state) => {
+    void (async () => {
+      // Whatever is already on the device paints first, so opening the app on a
+      // train is a list rather than a spinner.
+      if (await mirror.has(listId)) {
         if (cancelled) return
-        adopt(state)
+        const local = await mirror.getList(listId)
+        setSlug(local.slug)
+        setItems(local.items)
         setStatus('ready')
-      })
-      .catch((failure: unknown) => {
+      }
+
+      try {
+        const state = await api.getList(listId)
         if (cancelled) return
-        if (failure instanceof StoreError && failure.code === 'missing') {
+        await mirror.adopt(state, listId)
+        await reload()
+        setStatus('ready')
+      } catch (failure) {
+        if (cancelled) return
+
+        // The server is the authority on whether a list exists — but only when
+        // it can be reached. Offline with a local copy is a working app; offline
+        // without one is the only case with nothing to show.
+        if (failure instanceof ApiError && failure.status === 404) {
           setStatus('missing')
           return
         }
+        if (await mirror.has(listId)) return
+
         setError(describe(failure))
         setStatus('error')
-      })
+      }
+    })()
 
     return () => {
       cancelled = true
     }
-  }, [adopt, listId])
+  }, [listId, reload, syncer])
+
+  /* ------------------------------------------------------------------ sync */
+
+  useEffect(() => {
+    if (!syncer) return
+    const stopWatching = syncer.subscribe(setSync)
+    const stopListening = syncer.onChange(() => void reload())
+    return () => {
+      stopWatching()
+      stopListening()
+    }
+  }, [reload, syncer])
+
+  /**
+   * Polling, not push. The backend is serverless — a write and someone else's
+   * open connection can land on different instances, so there is nowhere to hold
+   * a subscriber list.
+   *
+   * Only a foregrounded app polls. A backgrounded one asking every three seconds
+   * would spend battery and hosting quota telling nobody anything. Returning to
+   * the app checks immediately, so it is current the moment you look at it.
+   */
+  useEffect(() => {
+    if (!syncer || status !== 'ready') return
+
+    let stopped = false
+    let timer: Timer | undefined
+    let failures = 0
+
+    const tick = async () => {
+      if (stopped || AppState.currentState !== 'active') return
+      await syncer.cycle()
+      failures = syncer.state().live ? 0 : failures + 1
+    }
+
+    const loop = () => {
+      // Backing off matters more here than on the web: a phone with no signal
+      // would otherwise retry every three seconds for as long as it is held.
+      const wait =
+        failures === 0 ? POLL_MS : BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]
+
+      timer = setTimeout(async () => {
+        await tick()
+        if (!stopped) loop()
+      }, wait)
+    }
+
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return
+      failures = 0
+      void tick()
+    })
+
+    void tick()
+    loop()
+
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+      subscription.remove()
+    }
+  }, [status, syncer])
 
   /* ------------------------------------------------------------- mutations */
 
   const flush = useCallback(
     (itemId: string) => {
       const buffered = buffers.current.get(itemId)
-      if (!buffered) return
+      if (!buffered || !listId || !syncer) return
 
       clearTimeout(buffered.timer)
       buffers.current.delete(itemId)
@@ -151,24 +216,19 @@ export function useSyncedList(listId: string | null): SyncedList {
       // An empty name would be rejected; keep it local until they type one.
       const patch = { ...buffered.patch }
       if (typeof patch.name === 'string' && patch.name.trim() === '') delete patch.name
-
-      if (!listId || Object.keys(patch).length === 0) {
-        endWrite()
-        return
-      }
+      if (Object.keys(patch).length === 0) return
 
       void (async () => {
         try {
-          const state = await mirror.patchItem(listId, itemId, patch)
-          if (inFlight.current === 1) adopt(state)
+          await mirror.patchItem(listId, itemId, patch)
         } catch {
-          stale.current = true
-        } finally {
-          endWrite()
+          // Already gone locally. The queued op will hear it from the server.
         }
+        await syncer.enqueue('patchItem', itemId, patch as Record<string, unknown>)
+        void syncer.cycle()
       })()
     },
-    [adopt, endWrite, listId],
+    [listId, syncer],
   )
 
   const flushAll = useCallback(() => {
@@ -176,8 +236,8 @@ export function useSyncedList(listId: string | null): SyncedList {
   }, [flush])
 
   /**
-   * Anything still inside the debounce window goes out now: backgrounding can
-   * be the last thing that happens to an app before Android reclaims it, and a
+   * Anything still inside the debounce window goes out now: backgrounding can be
+   * the last thing that happens to an app before Android reclaims it, and a
    * dropped buffer is a sentence the user typed and watched disappear.
    */
   useEffect(() => {
@@ -193,8 +253,6 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const existing = buffers.current.get(id)
       if (existing) clearTimeout(existing.timer)
-      // One in-flight slot per buffered item, claimed when the buffer opens.
-      else inFlight.current++
 
       buffers.current.set(id, {
         patch: { ...existing?.patch, ...patch },
@@ -207,19 +265,25 @@ export function useSyncedList(listId: string | null): SyncedList {
   const add = useCallback(
     (name: string): Item | null => {
       const trimmed = name.trim()
-      if (!trimmed || !listId) return null
+      if (!trimmed || !listId || !syncer) return null
 
       const item = Items.createItem(trimmed)
       setItems((prev) => [...prev, item])
-      void write(() => mirror.addItem(listId, { id: item.id, name: item.name }))
+
+      void (async () => {
+        await mirror.addItem(listId, { id: item.id, name: item.name })
+        await syncer.enqueue('addItem', item.id, { id: item.id, name: item.name })
+        void syncer.cycle()
+      })()
+
       return item
     },
-    [listId, write],
+    [listId, syncer],
   )
 
   const toggleBought = useCallback(
     (id: string) => {
-      if (!listId) return
+      if (!listId || !syncer) return
       flush(id)
 
       const current = itemsRef.current.find((i) => i.id === id)
@@ -227,45 +291,39 @@ export function useSyncedList(listId: string | null): SyncedList {
 
       const next = !current.bought
       setItems((prev) => Items.toggleBought(prev, id))
-      void write(() => mirror.patchItem(listId, id, { bought: next }))
+
+      void (async () => {
+        await mirror.patchItem(listId, id, { bought: next })
+        await syncer.enqueue('patchItem', id, { bought: next })
+        void syncer.cycle()
+      })()
     },
-    [flush, listId, write],
+    [flush, listId, syncer],
   )
 
   const remove = useCallback(
     (id: string) => {
-      if (!listId) return
+      if (!listId || !syncer) return
 
-      // Drop any queued edits for something that's about to not exist.
+      // Drop any queued edits for something that is about to not exist.
       const buffered = buffers.current.get(id)
       if (buffered) {
         clearTimeout(buffered.timer)
         buffers.current.delete(id)
-        endWrite()
       }
 
       setItems((prev) => Items.removeItem(prev, id))
-      void write(() => mirror.removeItem(listId, id))
+
+      void (async () => {
+        await mirror.removeItem(listId, id)
+        await syncer.enqueue('removeItem', id, {})
+        void syncer.cycle()
+      })()
     },
-    [endWrite, listId, write],
+    [listId, syncer],
   )
 
-  const rename = useCallback(
-    async (next: string): Promise<string | null> => {
-      if (!listId) return 'Not ready yet.'
-      inFlight.current++
-      try {
-        adopt(await mirror.renameList(listId, next))
-        return null
-      } catch (failure) {
-        return describe(failure)
-      } finally {
-        endWrite()
-      }
-    },
-    [adopt, endWrite, listId],
-  )
-
+  // Never leave a timer pointing at an unmounted component.
   useEffect(() => {
     const buffered = buffers.current
     return () => {
@@ -274,22 +332,52 @@ export function useSyncedList(listId: string | null): SyncedList {
     }
   }, [])
 
-  return { items, status, error, slug, add, update, toggleBought, remove, rename }
+  /**
+   * Renaming is the one write that cannot be queued.
+   *
+   * Whether a name is free is a question only the server can answer, and an
+   * optimistic rename that later lost would change a URL somebody had already
+   * been given. So this goes straight out, and says so plainly when it can't.
+   */
+  const rename = useCallback(
+    async (next: string): Promise<string | null> => {
+      if (!listId) return 'Not ready yet.'
+
+      const shape = slugProblem(next)
+      if (shape) return shape
+
+      try {
+        const state = await api.renameList(listId, next)
+        await mirror.adopt(state, listId)
+        await reload()
+        return null
+      } catch (failure) {
+        if (failure instanceof ApiError) return failure.message
+        return 'Renaming needs a connection — try again once you are online.'
+      }
+    },
+    [listId, reload],
+  )
+
+  return {
+    items,
+    status,
+    error,
+    live: sync.live,
+    pending: sync.pending,
+    slug,
+    add,
+    update,
+    toggleBought,
+    remove,
+    rename,
+  }
 }
 
-const cacheKey = (listId: string) => `thngstbuy.cache.${listId}`
-
+/** Turns a thrown value into one line a person can act on. */
 export function describe(failure: unknown): string {
+  if (failure instanceof ApiError) return `HTTP ${failure.status} — ${failure.message}`
   if (failure instanceof StoreError) return failure.message
   if (failure instanceof Error) return failure.message
   return String(failure)
-}
-
-function safeParse(raw: string): Item[] {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as Item[]) : []
-  } catch {
-    return []
-  }
 }

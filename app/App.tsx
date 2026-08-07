@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Pressable, Share, StyleSheet, Text, View } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar'
@@ -14,7 +14,7 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold'
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold'
 import * as Items from '@domain/items'
 import { api } from './src/api'
-import { mirror } from './src/mirror'
+import { shareUrl } from './src/config'
 import { LAST_LIST_KEY, storage } from './src/storage'
 import { describe, useSyncedList } from './src/useSyncedList'
 import { ListScreen } from './src/ListScreen'
@@ -109,6 +109,16 @@ export default function App() {
     [list, selectedId],
   )
 
+  /**
+   * The link, over whatever the phone offers. The https form rather than the
+   * app's own scheme, because the person receiving it may not have the app —
+   * this way it opens in their browser, and in the app if they do.
+   */
+  const handleShare = useCallback(() => {
+    if (!list.slug) return
+    void Share.share({ message: shareUrl(list.slug) })
+  }, [list.slug])
+
   if (!fontsLoaded) return <Splash />
 
   const problem = bootError ?? (list.status === 'error' ? list.error : null)
@@ -123,7 +133,12 @@ export default function App() {
           {problem ? (
             <Notice
               title="Can't open the list"
-              body="Something went wrong reading it from this device."
+              // A list this device has already seen opens offline, so reaching
+              // this screen means both the server and the local copy came up
+              // empty. Starting a new one is the only move, and it needs a
+              // connection — hence the detail line, which is the server's own
+              // words rather than a guess.
+              body="It isn't saved on this phone, and the server couldn't be reached to fetch it."
               detail={problem}
               actionLabel="Try again"
               onPress={startFresh}
@@ -131,7 +146,7 @@ export default function App() {
           ) : list.status === 'missing' ? (
             <Notice
               title="This list is gone"
-              body="Nothing on this device has that name — it may have been renamed, or removed when the app's data was cleared."
+              body="The server has nothing under that name. It may have been renamed — a link made before the rename keeps working, but a name typed by hand does not."
               actionLabel="Start a new list"
               onPress={startFresh}
             />
@@ -158,11 +173,14 @@ export default function App() {
           ) : (
             <ListScreen
               items={list.items}
+              live={list.live}
+              unsent={list.pending}
               onOpen={setSelectedId}
               onToggle={list.toggleBought}
               onDelete={handleDelete}
               onAdd={list.add}
               onRename={() => setNaming(true)}
+              onShare={handleShare}
             />
           )}
         </SafeAreaView>

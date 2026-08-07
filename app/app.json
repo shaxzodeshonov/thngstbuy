@@ -20,7 +20,21 @@
       "package": "app.thngstbuy.client",
       "adaptiveIcon": {
         "backgroundColor": "#FAF9F6"
-      }
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "thngstbuy.vercel.app",
+              "pathPrefix": "/l"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "plugins": ["expo-status-bar", "expo-font", "expo-sqlite"]
   }
